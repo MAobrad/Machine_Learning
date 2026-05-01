@@ -484,7 +484,7 @@ def afficher_tsne(modele, x_test, y_test, titre, fichier=None):
     repres = modele.get_hidden(x_test[idx]) if hasattr(modele, 'get_hidden') else x_test[idx]
 
     print("  Calcul t-SNE (peut prendre 1-2 min)...")
-    tsne = TSNE(n_components=2, random_state=42, perplexity=30, n_iter=1000)
+    tsne = TSNE(n_components=2, random_state=42, perplexity=30, max_iter=1000)
     proj = tsne.fit_transform(repres)
 
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -592,7 +592,7 @@ def menu_partie1():
             configs = [
                 ('Lineaire', ModeleLineaire(), 0.1, 'sgd'),
                 ('MLP-1 (h=128)', ModeleUneCoucheCachee(hidden_dim=128), 0.1, 'sgd'),
-                ('MLP-2 (128/64)', ModeleDeuxCouchesCachees(128, 64), 0.1, 'sgd'),
+                ('MLP-2 (128/64)', ModeleDeuxCouchesCachees(hidden1=128, hidden2=64), 0.1, 'sgd'),
             ]
             resultats = []
             for nom, modele, lr, opt in configs:
@@ -616,7 +616,7 @@ def menu_partie1():
 
         elif choix == '5':
             print("Entrainement MLP-2 pour matrice de confusion...")
-            modele = ModeleDeuxCouchesCachees(128, 64)
+            modele = ModeleDeuxCouchesCachees(hidden1=128, hidden2=64)
             entrainer(modele, x_train, y_train, x_test, y_test,
                       lr=0.1, epochs=30, verbose=False)
             y_pred = modele.predict(x_test)
@@ -624,7 +624,7 @@ def menu_partie1():
 
         elif choix == '6':
             print("Entrainement MLP-2 pour images mal classees...")
-            modele = ModeleDeuxCouchesCachees(128, 64)
+            modele = ModeleDeuxCouchesCachees(hidden1=128, hidden2=64)
             entrainer(modele, x_train, y_train, x_test, y_test,
                       lr=0.1, epochs=30, verbose=False)
             afficher_erreurs(modele, x_test, y_test,
@@ -654,11 +654,11 @@ def menu_partie1():
             print("\nComparaison SGD vs Adam sur MLP-2 (128/64), 30 epochs")
             print("─" * 52)
             print("  SGD (lr=0.1)...")
-            m_sgd = ModeleDeuxCouchesCachees(128, 64)
+            m_sgd = ModeleDeuxCouchesCachees(hidden1=128, hidden2=64)
             h_sgd = entrainer(m_sgd, x_train, y_train, x_test, y_test,
                               lr=0.1, epochs=30, verbose=False, optimizer='sgd')
             print("  Adam (lr=0.001)...")
-            m_adam = ModeleDeuxCouchesCachees(128, 64)
+            m_adam = ModeleDeuxCouchesCachees(hidden1=128, hidden2=64)
             h_adam = entrainer(m_adam, x_train, y_train, x_test, y_test,
                                lr=0.001, epochs=30, verbose=False, optimizer='adam')
 
