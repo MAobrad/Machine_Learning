@@ -1,7 +1,7 @@
 """
-part3_cbis_ddsm.py — Partie 3 : Détection de cancer du sein (CBIS-DDSM)
+part3_cbis_ddsm.py - Partie 3 : Detection de cancer du sein (CBIS-DDSM)
 Classification binaire : BENIGN (0) vs MALIGNANT (1)
-On utilise PyTorch et des métriques adaptées au contexte médical.
+On utilise PyTorch et des metriques adaptees au contexte medical.
 """
 
 import numpy as np
@@ -13,7 +13,7 @@ os.makedirs('rapport', exist_ok=True)
 
 
 # ============================================================
-# 1. CHARGEMENT ET PRÉTRAITEMENT
+# 1. CHARGEMENT ET PRETRAITEMENT
 # ============================================================
 
 def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128)):
@@ -24,7 +24,7 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
       - 'pathology'       : BENIGN / BENIGN_WITHOUT_CALLBACK / MALIGNANT
       - 'image file path' : chemin relatif vers l'image
 
-    Labels : BENIGN* → 0, MALIGNANT → 1
+    Labels : BENIGN = 0, MALIGNANT = 1
     """
     try:
         import pandas as pd
@@ -38,19 +38,19 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
         return df
 
     df_train = lire_df(csv_train)
-    df_test  = lire_df(csv_test) if csv_test and os.path.exists(csv_test) else None
+    df_test = lire_df(csv_test) if csv_test and os.path.exists(csv_test) else None
 
     print(f"  Train CSV : {len(df_train)} cas")
-    benins  = (df_train['label'] == 0).sum()
-    malins  = (df_train['label'] == 1).sum()
-    print(f"  Bénins : {benins}  Malins : {malins}  "
+    benins = (df_train['label'] == 0).sum()
+    malins = (df_train['label'] == 1).sum()
+    print(f"  Benins : {benins}  Malins : {malins}  "
           f"({malins/(benins+malins)*100:.1f}% malins)")
 
     # On cherche automatiquement la colonne qui contient le chemin de l'image
     col_img = next((c for c in df_train.columns
                     if 'image' in c.lower() and 'path' in c.lower()), None)
     if col_img is None:
-        raise ValueError("Colonne de chemin image non trouvée dans le CSV.")
+        raise ValueError("Colonne de chemin image non trouvee dans le CSV.")
 
     def ouvrir_image(path, target_size):
         """Supporte PNG/JPG (PIL) et DICOM (.dcm via pydicom)."""
@@ -58,7 +58,7 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
         if path.lower().endswith('.dcm'):
             try:
                 import pydicom
-                ds  = pydicom.dcmread(path)
+                ds = pydicom.dcmread(path)
                 arr = ds.pixel_array.astype(np.float32)
                 # Normalisation entre 0 et 1 pour les images DICOM (plage variable)
                 arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8)
@@ -84,7 +84,7 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
                 ok += 1
             except Exception as e:
                 manquants += 1
-        print(f"  Images chargées : {ok}  (manquantes/erreurs : {manquants})")
+        print(f"  Images chargees : {ok}  (manquantes/erreurs : {manquants})")
         if ok == 0:
             return None, None
         return np.array(X)[:, :, :, np.newaxis], np.array(y, dtype=np.int64)
@@ -93,8 +93,8 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
     X_train, y_train = charger_images(df_train)
 
     if X_train is None:
-        print("\n  ⚠️  Aucune image trouvée — les fichiers DICOM ne sont pas téléchargés.")
-        print("  → Basculement automatique sur données synthétiques.\n")
+        print("\n  Aucune image trouvee - les fichiers DICOM ne sont pas telecharges.")
+        print("  Basculement automatique sur donnees synthetiques.\n")
         return None, None, None, None, None
 
     if df_test is not None:
@@ -106,38 +106,40 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
         X_test, y_test = None, None
 
     if X_test is None:
-        # Si on n'a pas de set de test séparé, on fait un split 80/20
-        n     = len(X_train)
-        idx   = np.random.permutation(n)
+        # Si on n'a pas de set de test separe, on fait un split 80/20
+        n = len(X_train)
+        idx = np.random.permutation(n)
         split = int(0.8 * n)
-        X_test,  y_test  = X_train[idx[split:]], y_train[idx[split:]]
-        X_train, y_train = X_train[idx[:split]],  y_train[idx[:split]]
+        X_test = X_train[idx[split:]]
+        y_test = y_train[idx[split:]]
+        X_train = X_train[idx[:split]]
+        y_train = y_train[idx[:split]]
         print(f"  Split 80/20 : {len(X_train)} train / {len(X_test)} test")
 
-    # pos_weight sert à donner plus de poids aux exemples malins dans la loss
+    # pos_weight sert a donner plus de poids aux exemples malins dans la loss
     ratio_poids = (y_train == 0).sum() / max((y_train == 1).sum(), 1)
-    print(f"  Ratio bénin/malin (pos_weight) : {ratio_poids:.2f}")
+    print(f"  Ratio benin/malin (pos_weight) : {ratio_poids:.2f}")
 
     return X_train, y_train, X_test, y_test, ratio_poids
 
 
 def donnees_synthetiques(n=300, target_size=(128, 128)):
     """
-    Génère des données aléatoires pour tester le pipeline
+    Genere des donnees aleatoires pour tester le pipeline
     quand les images CBIS-DDSM ne sont pas disponibles (~163 Go sur TCIA).
     """
-    print("  Génération de données synthétiques (128×128, N&B)...")
+    print("  Generation de donnees synthetiques (128x128, N&B)...")
     np.random.seed(42)
     n_train = int(n * 0.8)
-    n_test  = n - n_train
+    n_test = n - n_train
 
     X_train = np.random.rand(n_train, *target_size, 1).astype(np.float32)
     y_train = np.random.randint(0, 2, n_train).astype(np.int64)
-    X_test  = np.random.rand(n_test,  *target_size, 1).astype(np.float32)
-    y_test  = np.random.randint(0, 2, n_test).astype(np.int64)
+    X_test = np.random.rand(n_test, *target_size, 1).astype(np.float32)
+    y_test = np.random.randint(0, 2, n_test).astype(np.int64)
 
     ratio = (y_train == 0).sum() / max((y_train == 1).sum(), 1)
-    print(f"  {n_train} train / {n_test} test  |  ratio bénin/malin : {ratio:.2f}")
+    print(f"  {n_train} train / {n_test} test  |  ratio benin/malin : {ratio:.2f}")
     return X_train, y_train, X_test, y_test, ratio
 
 
@@ -148,22 +150,22 @@ def donnees_synthetiques(n=300, target_size=(128, 128)):
 def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25):
     """
     CNN binaire pour mammographies.
-    Entrée : (N, 128, 128, 1) — images en niveaux de gris
-    Sortie : logit → BCEWithLogitsLoss (combine sigmoid + cross-entropy pour plus de stabilité)
+    Entree : (N, 128, 128, 1) - images en niveaux de gris
+    Sortie : logit -> BCEWithLogitsLoss (combine sigmoid + cross-entropy pour plus de stabilite)
 
-    Pourquoi un FN est-il bien plus grave qu'un FP en médecine ?
-    - FN (Faux Négatif) = un cancer classé bénin → le patient n'est pas traité → danger vital
-    - FP (Faux Positif) = un bénin classé malin  → biopsie inutile, stress, coût, mais réversible
-    En oncologie, on préfère accepter plus de FP pour éviter de rater des cancers.
-    On optimise donc la Sensibilité (= taux de vrais positifs) même si ça génère plus de FP.
+    Pourquoi un FN est-il bien plus grave qu'un FP en medecine ?
+    - FN (Faux Negatif) = un cancer classe benin, le patient n'est pas traite, danger vital
+    - FP (Faux Positif) = un benin classe malin, biopsie inutile, stress, cout, mais reversible
+    En oncologie, on prefere accepter plus de FP pour eviter de rater des cancers.
+    On optimise donc la Sensibilite (taux de vrais positifs) meme si ca genere plus de FP.
 
-    Comment adapter le seuil de décision ?
-    - Par défaut : seuil = 0.5 (équilibré entre sensibilité et spécificité)
-    - Baisser à 0.3 : plus de prédictions "malin" → sensibilité augmente, mais aussi les FP
+    Comment adapter le seuil de decision ?
+    - Par defaut : seuil = 0.5 (equilibre entre sensibilite et specificite)
+    - Baisser a 0.3 : plus de predictions "malin", sensibilite augmente, mais aussi les FP
     - La courbe ROC permet de choisir le meilleur seuil selon le compromis acceptable
 
-    pos_weight = nb_bénins / nb_malins : on pénalise davantage les erreurs sur les cas malins
-    pour compenser le déséquilibre des classes (il y a souvent plus de cas bénins).
+    pos_weight = nb_benins / nb_malins : on penalise davantage les erreurs sur les cas malins
+    pour compenser le desequilibre des classes (il y a souvent plus de cas benins).
     """
     try:
         import torch
@@ -171,7 +173,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25
         import torch.optim as optim
         from torch.utils.data import TensorDataset, DataLoader
     except ImportError:
-        print("  PyTorch non installé : venv/bin/pip install torch")
+        print("  PyTorch non installe : venv/bin/pip install torch")
         return None, None, None, None
 
     torch.manual_seed(42)
@@ -180,33 +182,33 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25
 
     # Conversion au format PyTorch (N, C, H, W)
     x_tr = torch.tensor(X_train.transpose(0, 3, 1, 2), dtype=torch.float32)
-    x_te = torch.tensor(X_test.transpose(0, 3, 1, 2),  dtype=torch.float32)
+    x_te = torch.tensor(X_test.transpose(0, 3, 1, 2), dtype=torch.float32)
     y_tr = torch.tensor(y_train, dtype=torch.float32)
-    y_te = torch.tensor(y_test,  dtype=torch.float32)
+    y_te = torch.tensor(y_test, dtype=torch.float32)
 
-    train_loader = DataLoader(TensorDataset(x_tr, y_tr), batch_size=32, shuffle=True,  num_workers=0)
-    test_loader  = DataLoader(TensorDataset(x_te, y_te), batch_size=64, shuffle=False, num_workers=0)
+    train_loader = DataLoader(TensorDataset(x_tr, y_tr), batch_size=32, shuffle=True, num_workers=0)
+    test_loader = DataLoader(TensorDataset(x_te, y_te), batch_size=64, shuffle=False, num_workers=0)
 
     class CNN_Mammography(nn.Module):
         def __init__(self):
             super().__init__()
-            # Bloc 1 : 128×128 → 64×64
+            # Bloc 1 : 128x128 -> 64x64
             self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
-            self.bn1   = nn.BatchNorm2d(32)
+            self.bn1 = nn.BatchNorm2d(32)
             self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
-            self.bn2   = nn.BatchNorm2d(64)
+            self.bn2 = nn.BatchNorm2d(64)
             self.pool1 = nn.MaxPool2d(2, 2)
-            # Bloc 2 : 64×64 → 32×32
+            # Bloc 2 : 64x64 -> 32x32
             self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
-            self.bn3   = nn.BatchNorm2d(128)
+            self.bn3 = nn.BatchNorm2d(128)
             self.pool2 = nn.MaxPool2d(2, 2)
-            # Bloc 3 : 32×32 → 16×16
+            # Bloc 3 : 32x32 -> 16x16
             self.conv4 = nn.Conv2d(128, 128, 3, padding=1)
-            self.bn4   = nn.BatchNorm2d(128)
+            self.bn4 = nn.BatchNorm2d(128)
             self.pool3 = nn.MaxPool2d(2, 2)
-            # Tête de classification binaire
-            self.fc1  = nn.Linear(128 * 16 * 16, 256)
-            self.fc2  = nn.Linear(256, 1)
+            # Tete de classification binaire
+            self.fc1 = nn.Linear(128 * 16 * 16, 256)
+            self.fc2 = nn.Linear(256, 1)
             self.relu = nn.ReLU()
             self.drop = nn.Dropout(0.5)
 
@@ -220,15 +222,15 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25
             x = self.pool3(x)
             x = torch.flatten(x, 1)
             x = self.drop(self.relu(self.fc1(x)))
-            return self.fc2(x)   # logits bruts (pas de sigmoid ici, géré par la loss)
+            return self.fc2(x)   # logits bruts (pas de sigmoid ici, gere par la loss)
 
-    model     = CNN_Mammography().to(device)
-    n_params  = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"  Paramètres : {n_params:,}")
+    model = CNN_Mammography().to(device)
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"  Parametres : {n_params:,}")
 
     pos_weight = torch.tensor([ratio_poids], dtype=torch.float32).to(device)
-    criterion  = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    optimizer  = optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-4)
 
     hist = {'loss_tr': [], 'loss_te': [], 'acc_tr': [], 'acc_te': []}
 
@@ -239,74 +241,84 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25
             xb = xb.to(device)
             yb = yb.unsqueeze(1).to(device)
             optimizer.zero_grad()
-            out  = model(xb)
+            out = model(xb)
             loss = criterion(out, yb)
             loss.backward()
             optimizer.step()
             loss_s += loss.item() * xb.size(0)
-            corr   += ((torch.sigmoid(out) > 0.5).float() == yb).sum().item()
-            tot    += xb.size(0)
-        loss_tr = loss_s / tot; acc_tr = corr / tot
+            corr += ((torch.sigmoid(out) > 0.5).float() == yb).sum().item()
+            tot += xb.size(0)
+        loss_tr = loss_s / tot
+        acc_tr = corr / tot
 
         model.eval()
         loss_s2, corr2, tot2 = 0.0, 0, 0
         all_probs, all_preds, all_labels = [], [], []
         with torch.no_grad():
             for xb, yb in test_loader:
-                xb  = xb.to(device)
+                xb = xb.to(device)
                 yb2 = yb.unsqueeze(1).to(device)
-                out  = model(xb)
+                out = model(xb)
                 prob = torch.sigmoid(out)
                 loss_s2 += criterion(out, yb2).item() * xb.size(0)
-                pred     = (prob > 0.5).float()
-                corr2   += (pred == yb2).sum().item()
-                tot2    += xb.size(0)
+                pred = (prob > 0.5).float()
+                corr2 += (pred == yb2).sum().item()
+                tot2 += xb.size(0)
                 all_probs.extend(prob.cpu().numpy().flatten())
                 all_preds.extend(pred.cpu().numpy().flatten())
                 all_labels.extend(yb.numpy())
-        loss_te = loss_s2 / tot2; acc_te = corr2 / tot2
+        loss_te = loss_s2 / tot2
+        acc_te = corr2 / tot2
 
-        hist['loss_tr'].append(loss_tr); hist['loss_te'].append(loss_te)
-        hist['acc_tr'].append(acc_tr);   hist['acc_te'].append(acc_te)
+        hist['loss_tr'].append(loss_tr)
+        hist['loss_te'].append(loss_te)
+        hist['acc_tr'].append(acc_tr)
+        hist['acc_te'].append(acc_te)
 
         print(f"  Epoch {ep+1:2d}/{epochs} | "
               f"Loss {loss_tr:.4f}/{loss_te:.4f} | "
               f"Acc {acc_tr:.4f}/{acc_te:.4f}")
 
-    y_true  = np.array(all_labels)
-    y_pred  = np.array(all_preds)
+    y_true = np.array(all_labels)
+    y_pred = np.array(all_preds)
     y_probs = np.array(all_probs)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-    ax1.plot(hist['loss_tr'], label='Train'); ax1.plot(hist['loss_te'], label='Test')
-    ax1.set_title('Loss — Mammographie'); ax1.set_xlabel('Epoch'); ax1.legend()
-    ax2.plot(hist['acc_tr'], label='Train'); ax2.plot(hist['acc_te'], label='Test')
-    ax2.set_title('Accuracy — Mammographie'); ax2.set_xlabel('Epoch'); ax2.legend()
+    ax1.plot(hist['loss_tr'], label='Train')
+    ax1.plot(hist['loss_te'], label='Test')
+    ax1.set_title('Loss - Mammographie')
+    ax1.set_xlabel('Epoch')
+    ax1.legend()
+    ax2.plot(hist['acc_tr'], label='Train')
+    ax2.plot(hist['acc_te'], label='Test')
+    ax2.set_title('Accuracy - Mammographie')
+    ax2.set_xlabel('Epoch')
+    ax2.legend()
     plt.tight_layout()
     plt.savefig('rapport/p3_courbes.png', dpi=150, bbox_inches='tight')
     plt.show()
-    print("  Figure sauvegardée : rapport/p3_courbes.png")
+    print("  Figure sauvegardee : rapport/p3_courbes.png")
 
     return model, y_true, y_pred, y_probs
 
 
 # ============================================================
-# 3. ÉVALUATION MÉDICALE
+# 3. EVALUATION MEDICALE
 # ============================================================
 
 def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5):
     """
-    Métriques médicales complètes pour la détection de cancer.
+    Metriques medicales completes pour la detection de cancer.
 
     Rappel des 4 cas possibles :
-    - TP (Vrai Positif)  : cancer détecté correctement
-    - TN (Vrai Négatif)  : bénin détecté correctement
-    - FP (Faux Positif)  : bénin classé malin → biopsie inutile, mais patient averti
-    - FN (Faux Négatif)  : cancer classé bénin → non traité → potentiellement fatal
+    - TP (Vrai Positif)  : cancer detecte correctement
+    - TN (Vrai Negatif)  : benin detecte correctement
+    - FP (Faux Positif)  : benin classe malin, biopsie inutile, mais patient averti
+    - FN (Faux Negatif)  : cancer classe benin, non traite, potentiellement fatal
 
-    En pratique clinique, on accepte une sensibilité ≥ 90% même si la spécificité baisse,
+    En pratique clinique, on accepte une sensibilite >= 90% meme si la specificite baisse,
     car rater un cancer (FN) est bien plus grave qu'une fausse alarme (FP).
-    Le seuil optimal peut être déterminé via la courbe ROC (critère de Youden).
+    Le seuil optimal peut etre determine via la courbe ROC (critere de Youden).
     """
     y_pred_bin = (y_pred >= seuil).astype(int) if y_pred.max() <= 1.0 else y_pred.astype(int)
 
@@ -317,48 +329,48 @@ def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5):
 
     sensibilite = TP / max(TP + FN, 1)
     specificite = TN / max(TN + FP, 1)
-    precision   = TP / max(TP + FP, 1)
-    f1          = 2 * TP / max(2 * TP + FP + FN, 1)
+    precision = TP / max(TP + FP, 1)
+    f1 = 2 * TP / max(2 * TP + FP + FN, 1)
 
     print("\n" + "=" * 48)
-    print("  ÉVALUATION MÉDICALE")
+    print("  EVALUATION MEDICALE")
     print("=" * 48)
     print(f"  Matrice de confusion (seuil={seuil}) :")
-    print(f"                    Prédit Bénin  Prédit Malin")
-    print(f"    Réel Bénin  :   TN = {TN:6d}   FP = {FP:6d}")
-    print(f"    Réel Malin  :   FN = {FN:6d}   TP = {TP:6d}")
-    print(f"\n  Sensibilité (Recall)  : {sensibilite:.4f}  ← minimiser les FN")
-    print(f"  Spécificité           : {specificite:.4f}")
-    print(f"  Précision             : {precision:.4f}")
-    print(f"  F1-score              : {f1:.4f}")
+    print(f"                    Predit Benin  Predit Malin")
+    print(f"    Reel Benin  :   TN = {TN:6d}   FP = {FP:6d}")
+    print(f"    Reel Malin  :   FN = {FN:6d}   TP = {TP:6d}")
+    print(f"\n  Sensibilite (Recall) : {sensibilite:.4f}  (objectif : minimiser les FN)")
+    print(f"  Specificite          : {specificite:.4f}")
+    print(f"  Precision            : {precision:.4f}")
+    print(f"  F1-score             : {f1:.4f}")
 
     if FN > 0:
-        print(f"\n  ⚠️  {FN} cancer(s) NON DÉTECTÉ(S) [FN] — DANGER MÉDICAL")
+        print(f"\n  ATTENTION : {FN} cancer(s) NON DETECTE(S) [FN] - DANGER MEDICAL")
     if sensibilite < 0.85:
-        print(f"  ⚠️  Sensibilité < 85% — inacceptable cliniquement")
+        print(f"  Sensibilite < 85% - inacceptable cliniquement")
     else:
-        print(f"  ✅ Sensibilité acceptable (≥ 85%)")
+        print(f"  Sensibilite acceptable (>= 85%)")
 
     # Matrice de confusion visuelle sous forme de heatmap
     mat = np.array([[TN, FP], [FN, TP]])
-    labels_ax = ['Bénin', 'Malin']
     fig, ax = plt.subplots(figsize=(5, 4))
     im = ax.imshow(mat, cmap='Blues')
     plt.colorbar(im, ax=ax)
-    ax.set_xticks([0, 1]); ax.set_yticks([0, 1])
-    ax.set_xticklabels(['Prédit Bénin', 'Prédit Malin'])
-    ax.set_yticklabels(['Réel Bénin', 'Réel Malin'])
+    ax.set_xticks([0, 1])
+    ax.set_yticks([0, 1])
+    ax.set_xticklabels(['Predit Benin', 'Predit Malin'])
+    ax.set_yticklabels(['Reel Benin', 'Reel Malin'])
     for i in range(2):
         for j in range(2):
             ax.text(j, i, mat[i, j], ha='center', va='center', fontsize=14,
                     color='white' if mat[i, j] > mat.max() / 2 else 'black')
-    ax.set_title('Matrice de confusion — Mammographie')
+    ax.set_title('Matrice de confusion - Mammographie')
     plt.tight_layout()
     plt.savefig('rapport/p3_confusion.png', dpi=150, bbox_inches='tight')
     plt.show()
-    print("  Figure sauvegardée : rapport/p3_confusion.png")
+    print("  Figure sauvegardee : rapport/p3_confusion.png")
 
-    # Courbe ROC + seuil optimal par critère de Youden (max de sensibilité - (1-spécificité))
+    # Courbe ROC + seuil optimal par critere de Youden (max de sensibilite - (1 - specificite))
     if y_probs is not None:
         try:
             from sklearn.metrics import roc_auc_score, roc_curve
@@ -366,27 +378,26 @@ def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5):
             print(f"\n  AUC-ROC : {auc:.4f}")
 
             fpr, tpr, thresholds = roc_curve(y_true, y_probs)
-            idx_opt   = np.argmax(tpr - fpr)   # critère de Youden : maximise J = sensibilité + spécificité - 1
+            idx_opt = np.argmax(tpr - fpr)   # critere de Youden : maximise J = sensibilite + specificite - 1
             seuil_opt = thresholds[idx_opt]
 
             print(f"  Seuil optimal (Youden J) : {seuil_opt:.3f}")
-            print(f"  → Sensibilité : {tpr[idx_opt]:.4f}  "
-                  f"Spécificité : {1 - fpr[idx_opt]:.4f}")
-            print(f"  → Pour minimiser les FN : utiliser seuil ≤ {seuil_opt:.3f}")
+            print(f"  Sensibilite : {tpr[idx_opt]:.4f}  Specificite : {1 - fpr[idx_opt]:.4f}")
+            print(f"  Pour minimiser les FN : utiliser seuil <= {seuil_opt:.3f}")
 
             fig, ax = plt.subplots(figsize=(6, 5))
             ax.plot(fpr, tpr, color='steelblue', lw=2, label=f'ROC (AUC={auc:.3f})')
-            ax.plot([0, 1], [0, 1], 'k--', label='Aléatoire')
+            ax.plot([0, 1], [0, 1], 'k--', label='Aleatoire')
             ax.scatter(fpr[idx_opt], tpr[idx_opt], color='red', zorder=5,
                        label=f'Seuil optimal = {seuil_opt:.2f}')
-            ax.set_xlabel('1 − Spécificité (Faux Positifs)')
-            ax.set_ylabel('Sensibilité (Vrais Positifs)')
-            ax.set_title('Courbe ROC — Détection Cancer du Sein')
+            ax.set_xlabel('1 - Specificite (Faux Positifs)')
+            ax.set_ylabel('Sensibilite (Vrais Positifs)')
+            ax.set_title('Courbe ROC - Detection Cancer du Sein')
             ax.legend()
             plt.tight_layout()
             plt.savefig('rapport/p3_roc.png', dpi=150, bbox_inches='tight')
             plt.show()
-            print("  Figure sauvegardée : rapport/p3_roc.png")
+            print("  Figure sauvegardee : rapport/p3_roc.png")
 
         except ImportError:
             print("  (sklearn non disponible pour AUC-ROC)")
@@ -402,10 +413,10 @@ def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5):
 def menu_partie3():
     """Menu interactif de la Partie 3."""
     print("\n" + "=" * 52)
-    print("   PARTIE 3 — Détection Cancer du Sein (CBIS-DDSM)")
+    print("   PARTIE 3 - Detection Cancer du Sein (CBIS-DDSM)")
     print("=" * 52)
-    print("  Prérequis : CSV CBIS-DDSM + images correspondantes")
-    print("  Sans données → pipeline de démonstration synthétique\n")
+    print("  Prerequis : CSV CBIS-DDSM + images correspondantes")
+    print("  Sans donnees : pipeline de demonstration synthetique\n")
 
     csv_train = input("  CSV train [mass_case_description_train_set.csv] : ").strip()
     if not csv_train:
@@ -415,35 +426,35 @@ def menu_partie3():
         csv_test = 'mass_case_description_test_set.csv'
     img_dir = input("  Dossier images [.] : ").strip() or '.'
 
-    mode = "synthétique"
+    mode = "synthetique"
     if os.path.exists(csv_train):
         result = charger_cbis_ddsm(csv_train, csv_test, img_dir)
         if result[0] is not None:
             X_train, y_train, X_test, y_test, ratio = result
-            mode = "réel"
+            mode = "reel"
         else:
-            print("  → Basculement sur données synthétiques.")
+            print("  Basculement sur donnees synthetiques.")
             X_train, y_train, X_test, y_test, ratio = donnees_synthetiques(n=300)
     else:
-        print(f"\n  Fichier non trouvé : {csv_train}")
-        print("  → Utilisation de données synthétiques pour la démonstration.")
+        print(f"\n  Fichier non trouve : {csv_train}")
+        print("  Utilisation de donnees synthetiques pour la demonstration.")
         X_train, y_train, X_test, y_test, ratio = donnees_synthetiques(n=300)
 
     print(f"\n  Mode : {mode}")
     print(f"  Train : {X_train.shape}  Test : {X_test.shape}")
 
     modele_entraine = None
-    y_true_last     = None
-    y_pred_last     = None
-    y_probs_last    = None
+    y_true_last = None
+    y_pred_last = None
+    y_probs_last = None
 
     while True:
         print("\n" + "=" * 52)
-        print("   PARTIE 3 — CBIS-DDSM")
+        print("   PARTIE 3 - CBIS-DDSM")
         print("=" * 52)
-        print("  1  - Entraîner CNN Mammographie")
-        print("  2  - Évaluation médicale complète")
-        print("  3  - Analyse seuil de décision")
+        print("  1  - Entrainer CNN Mammographie")
+        print("  2  - Evaluation medicale complete")
+        print("  3  - Analyse seuil de decision")
         print("  0  - Retour au menu principal")
         print("-" * 52)
 
@@ -451,25 +462,25 @@ def menu_partie3():
 
         if choix == '1':
             epochs_str = input("  Nombre d'epochs [25] : ").strip()
-            epochs     = int(epochs_str) if epochs_str.isdigit() else 25
+            epochs = int(epochs_str) if epochs_str.isdigit() else 25
             result = entrainer_cnn_mammo(X_train, y_train, X_test, y_test,
-                                          ratio, epochs=epochs)
+                                         ratio, epochs=epochs)
             if result[0] is not None:
                 modele_entraine, y_true_last, y_pred_last, y_probs_last = result
                 evaluer_medical(y_true_last, y_pred_last, y_probs_last)
 
         elif choix == '2':
             if y_true_last is None:
-                print("  Entraîner d'abord le modèle (option 1).")
+                print("  Entrainer d'abord le modele (option 1).")
             else:
                 evaluer_medical(y_true_last, y_pred_last, y_probs_last)
 
         elif choix == '3':
             if y_probs_last is None:
-                print("  Entraîner d'abord le modèle (option 1).")
+                print("  Entrainer d'abord le modele (option 1).")
             else:
-                print("\n  Analyse de sensibilité selon le seuil :")
-                print(f"  {'Seuil':>6} {'Sensibilité':>12} {'Spécificité':>12} {'F1':>8}")
+                print("\n  Analyse de sensibilite selon le seuil :")
+                print(f"  {'Seuil':>6} {'Sensibilite':>12} {'Specificite':>12} {'F1':>8}")
                 print("  " + "-" * 42)
                 for seuil in [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]:
                     res = evaluer_medical(y_true_last, y_probs_last, seuil=seuil)
