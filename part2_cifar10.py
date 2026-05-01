@@ -1,6 +1,6 @@
 """
 part2_cifar10.py — Partie 2 : CIFAR-10 + Convolutions + CNN PyTorch
-Études préliminaires avec MLP NumPy, démo filtres, CNN complet.
+Études préliminaires avec MLP NumPy, démonstration des filtres, CNN complet.
 """
 
 import numpy as np
@@ -57,26 +57,23 @@ def charger_cifar10():
 # ============================================================
 
 def rgb_vers_gris(images):
-    """
-    Conversion RGB → niveaux de gris.
-    Formule standard ITU-R BT.601 :
-    x = 0.299·R + 0.587·G + 0.114·B
-    Les coefficients reflètent la sensibilité de l'œil humain.
-    """
+    # Formule standard ITU-R BT.601 pour convertir RGB en niveaux de gris
+    # Les coefficients (0.299, 0.587, 0.114) reflètent la sensibilité de l'œil humain :
+    # on est plus sensible au vert qu'au rouge, et très peu sensible au bleu
     return (0.299 * images[:, :, :, 0] +
             0.587 * images[:, :, :, 1] +
             0.114 * images[:, :, :, 2])
 
 
 def preparer_gris(x_train, x_test):
-    """Images CIFAR (N,32,32,3) → vecteurs gris (N,1024) ∈ [0,1]."""
+    """Images CIFAR (N,32,32,3) → vecteurs niveaux de gris (N,1024) dans [0,1]."""
     g_tr = rgb_vers_gris(x_train).reshape(-1, 1024).astype(np.float32) / 255.0
     g_te = rgb_vers_gris(x_test).reshape(-1,  1024).astype(np.float32) / 255.0
     return g_tr, g_te
 
 
 def preparer_couleur(x_train, x_test):
-    """Images CIFAR (N,32,32,3) → vecteurs couleur (N,3072) ∈ [0,1]."""
+    """Images CIFAR (N,32,32,3) → vecteurs couleur aplatis (N,3072) dans [0,1]."""
     c_tr = x_train.reshape(-1, 3072).astype(np.float32) / 255.0
     c_te = x_test.reshape(-1,  3072).astype(np.float32) / 255.0
     return c_tr, c_te
@@ -90,14 +87,14 @@ def etudes_preliminaires(x_train, y_train, x_test, y_test):
     """
     Étude A : images en niveaux de gris (1024 dims)
     Étude B : images couleur aplaties  (3072 dims)
-    Applique les 3 architectures MLP NumPy sur CIFAR-10.
+    On applique les 3 architectures MLP NumPy sur CIFAR-10 pour comparer.
 
-    # Pourquoi CIFAR-10 est-il plus difficile que MNIST ?
-    # 1. Images couleur 32×32 avec variabilité intra-classe élevée
-    #    (un chien peut être vu de face, de profil, debout, couché...)
-    # 2. Invariances nécessaires : rotation, éclairage, occlusion partielle
-    # 3. MLP linéaire : pas d'invariance spatiale → sous-performant
-    # 4. MNIST : 28×28 N&B, chiffres centrés, peu de variabilité → plus simple
+    Pourquoi CIFAR-10 est plus difficile que MNIST ?
+    - Les images sont en couleur (32×32×3) avec une grande variabilité intra-classe :
+      un chien peut être vu de face, de profil, debout, couché...
+    - Un MLP linéaire n'a pas d'invariance spatiale → il ne reconnaît pas un objet décalé
+    - MNIST : chiffres centrés sur fond blanc, très peu de variabilité → tâche plus simple
+    - La couleur ajoute de l'information mais aussi plus de paramètres à apprendre
     """
     print("\n" + "=" * 60)
     print("  ÉTUDES PRÉLIMINAIRES — MLP NumPy sur CIFAR-10")
@@ -125,7 +122,6 @@ def etudes_preliminaires(x_train, y_train, x_test, y_test):
         print(f"    Err train: {err_tr:.4f}  Err test: {err_te:.4f}")
         resultats.append((nom, inp, err_tr, err_te))
 
-    # Tableau comparatif
     print("\n" + "=" * 65)
     print(f"  {'Architecture':<22} {'Input':<9} {'Err train':>10} {'Err test':>10}")
     print("  " + "-" * 54)
@@ -137,7 +133,7 @@ def etudes_preliminaires(x_train, y_train, x_test, y_test):
     print("    Maxout Networks       (2013) :  9.38%")
     print("    ViT Vision Transformer(2021) :  0.5%")
 
-    # Graphique comparatif
+    # Graphique comparatif gris vs couleur pour les 3 architectures
     labels  = [f"{n}\n({i})" for n, i, _, _ in resultats]
     errs_te = [r[3] for r in resultats]
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -159,6 +155,7 @@ def etudes_preliminaires(x_train, y_train, x_test, y_test):
 # 4. DÉMONSTRATION — 6 FILTRES DE CONVOLUTION
 # ============================================================
 
+# Les 6 filtres qu'on va appliquer sur une image CIFAR en niveaux de gris
 FILTRES = {
     'K1 — Flou (moyenne)':     (1/9) * np.ones((3, 3)),
     'K2 — Netteté':            np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=float),
@@ -173,13 +170,13 @@ def demo_filtres(x_train_raw):
     """
     Applique les 6 filtres sur une image CIFAR et affiche le résultat.
 
-    Commentaires sur les effets :
-    K1 (Flou)          : moyenne des voisins → lisse bruit et petits détails
-    K2 (Netteté)       : amplifie différences locales → renforce contours
-    K3 (Bords vert.)   : détecte transitions horizontales (bords haut/bas)
-    K4 (Gradient H.)   : variations horizontales (bords gauche/droite)
-    K5 (Sobel H.)      : version robuste de K4, pondérée en centre de ligne
-    K6 (Sobel diag.)   : bords orientés en diagonale bas-gauche → haut-droite
+    Effet de chaque filtre :
+    K1 (Flou)          : fait la moyenne des pixels voisins → lisse le bruit et les détails fins
+    K2 (Netteté)       : amplifie les différences locales → les contours ressortent davantage
+    K3 (Bords vert.)   : détecte les transitions entre zones claires/sombres de haut en bas
+    K4 (Gradient H.)   : détecte les variations de gauche à droite (bords verticaux)
+    K5 (Sobel H.)      : version plus robuste de K4, pondère plus le centre de la ligne
+    K6 (Sobel diag.)   : détecte les bords orientés en diagonale
     """
     img_rgb  = x_train_raw[np.random.randint(len(x_train_raw))]
     img_gray = rgb_vers_gris(img_rgb[np.newaxis])[0] / 255.0   # (32, 32)
@@ -195,7 +192,6 @@ def demo_filtres(x_train_raw):
         axes[row, col].set_title(nom, fontsize=9)
         axes[row, col].axis('off')
 
-    # Dernière case vide → afficher l'image en gris
     axes[1, 3].imshow(img_gray, cmap='gray')
     axes[1, 3].set_title('Original (gris)'); axes[1, 3].axis('off')
 
@@ -219,11 +215,11 @@ def demo_filtres(x_train_raw):
 
 
 def demo_convolution_couleur(x_train_raw):
-    """Démo convolution 3 canaux → 1 feature map."""
+    """Démo convolution 3 canaux → 1 feature map : on applique Sobel sur chaque canal RGB."""
     img = x_train_raw[0].astype(np.float32) / 255.0   # (32, 32, 3)
 
     sobel = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
-    kernels_rgb = np.stack([sobel, sobel, sobel], axis=-1)   # (3, 3, 3)
+    kernels_rgb = np.stack([sobel, sobel, sobel], axis=-1)   # même filtre sur les 3 canaux
     feature_map = convolve2d_color(img, kernels_rgb)
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
@@ -242,7 +238,7 @@ def demo_convolution_couleur(x_train_raw):
 
 
 def demo_max_pooling(x_train_raw):
-    """Démo Max-Pooling 2×2 sur une feature map."""
+    """Démo Max-Pooling 2×2 : on montre la réduction de résolution après un filtre Sobel."""
     img      = x_train_raw[0].astype(np.float32) / 255.0
     img_gray = rgb_vers_gris(img[np.newaxis])[0]
 
@@ -278,12 +274,12 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
       Conv4(64→64) → BN → ReLU
       Flatten → Dropout → FC(4096→10)
 
-    # Qu'est-ce que l'overfitting et comment le Dropout le réduit-il ?
-    # Overfitting = mémorisation du train (train acc >> test acc).
-    # Dropout : à chaque forward pass, désactive aléatoirement p% des neurones.
-    # → Le réseau ne peut pas dépendre d'un neurone spécifique.
-    # → Force une représentation distribuée et plus généralisable.
-    # Détection : si acc_train - acc_test > 10%, overfitting probable.
+    Qu'est-ce que l'overfitting et comment le Dropout le limite ?
+    Overfitting = le modèle mémorise le train set au lieu de généraliser (train acc >> test acc).
+    Dropout : à chaque forward pass, on désactive aléatoirement p% des neurones.
+    Le réseau ne peut plus dépendre d'un seul neurone → il apprend des représentations
+    plus robustes et distribuées, ce qui améliore la généralisation sur le test set.
+    On détecte l'overfitting si acc_train - acc_test dépasse ~10%.
     """
     try:
         import torch
@@ -299,7 +295,7 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n  Device : {device}")
 
-    # (N,H,W,C) → (N,C,H,W), normalisation [0,1]
+    # PyTorch attend le format (N, C, H, W) → on transpose depuis (N, H, W, C)
     x_tr = torch.tensor(x_train_raw.transpose(0, 3, 1, 2), dtype=torch.float32) / 255.0
     x_te = torch.tensor(x_test_raw.transpose(0, 3, 1, 2),  dtype=torch.float32) / 255.0
     y_tr = torch.tensor(y_train, dtype=torch.long)
@@ -333,7 +329,7 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
             x = self.pool2(x)                         # (B,64,8,8)
             x = self.relu(self.bn4(self.conv4(x)))   # (B,64,8,8)
             x = self.drop(torch.flatten(x, 1))        # (B,4096)
-            return self.fc(x)                          # (B,10) logits
+            return self.fc(x)                          # (B,10) logits bruts
 
     model = CNN_CIFAR10().to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -341,6 +337,7 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
+    # CosineAnnealingLR diminue progressivement le learning rate en suivant une courbe en cosinus
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20)
 
     epochs = 20
@@ -382,7 +379,6 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
               f"Loss {loss_tr:.4f}/{loss_te:.4f} | "
               f"Acc {acc_tr:.4f}/{acc_te:.4f}")
 
-    # Courbes
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
     ax1.plot(hist['loss_tr'], label='Train'); ax1.plot(hist['loss_te'], label='Test')
     ax1.set_title('Loss CNN CIFAR-10'); ax1.set_xlabel('Epoch'); ax1.legend()

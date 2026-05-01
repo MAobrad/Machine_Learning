@@ -1,7 +1,7 @@
 """
 part3_cbis_ddsm.py — Partie 3 : Détection de cancer du sein (CBIS-DDSM)
 Classification binaire : BENIGN (0) vs MALIGNANT (1)
-PyTorch + métriques médicales spécialisées.
+On utilise PyTorch et des métriques adaptées au contexte médical.
 """
 
 import numpy as np
@@ -18,7 +18,7 @@ os.makedirs('rapport', exist_ok=True)
 
 def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128)):
     """
-    Charge CBIS-DDSM depuis CSV + images PNG/DICOM.
+    Charge CBIS-DDSM depuis un fichier CSV + les images PNG/DICOM correspondantes.
 
     Colonnes CSV attendues :
       - 'pathology'       : BENIGN / BENIGN_WITHOUT_CALLBACK / MALIGNANT
@@ -46,7 +46,7 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
     print(f"  Bénins : {benins}  Malins : {malins}  "
           f"({malins/(benins+malins)*100:.1f}% malins)")
 
-    # Déterminer la colonne de chemin
+    # On cherche automatiquement la colonne qui contient le chemin de l'image
     col_img = next((c for c in df_train.columns
                     if 'image' in c.lower() and 'path' in c.lower()), None)
     if col_img is None:
@@ -60,6 +60,7 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
                 import pydicom
                 ds  = pydicom.dcmread(path)
                 arr = ds.pixel_array.astype(np.float32)
+                # Normalisation entre 0 et 1 pour les images DICOM (plage variable)
                 arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8)
                 img = Image.fromarray((arr * 255).astype(np.uint8)).convert('L')
             except ImportError:
@@ -105,7 +106,7 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
         X_test, y_test = None, None
 
     if X_test is None:
-        # Split 80/20
+        # Si on n'a pas de set de test séparé, on fait un split 80/20
         n     = len(X_train)
         idx   = np.random.permutation(n)
         split = int(0.8 * n)
@@ -113,6 +114,7 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
         X_train, y_train = X_train[idx[:split]],  y_train[idx[:split]]
         print(f"  Split 80/20 : {len(X_train)} train / {len(X_test)} test")
 
+    # pos_weight sert à donner plus de poids aux exemples malins dans la loss
     ratio_poids = (y_train == 0).sum() / max((y_train == 1).sum(), 1)
     print(f"  Ratio bénin/malin (pos_weight) : {ratio_poids:.2f}")
 
@@ -121,8 +123,8 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
 
 def donnees_synthetiques(n=300, target_size=(128, 128)):
     """
-    Génère des données synthétiques pour tester le pipeline
-    quand CBIS-DDSM n'est pas disponible.
+    Génère des données aléatoires pour tester le pipeline
+    quand les images CBIS-DDSM ne sont pas disponibles (~163 Go sur TCIA).
     """
     print("  Génération de données synthétiques (128×128, N&B)...")
     np.random.seed(42)
@@ -146,22 +148,22 @@ def donnees_synthetiques(n=300, target_size=(128, 128)):
 def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25):
     """
     CNN binaire pour mammographies.
-    Entrée : (N, 128, 128, 1) — niveaux de gris
-    Sortie : logit → BCEWithLogitsLoss
+    Entrée : (N, 128, 128, 1) — images en niveaux de gris
+    Sortie : logit → BCEWithLogitsLoss (combine sigmoid + cross-entropy pour plus de stabilité)
 
-    # Pourquoi un FN est-il bien plus grave qu'un FP en médical ?
-    # FN (Faux Négatif) = cancer classé bénin → patient non traité → pronostic fatal
-    # FP (Faux Positif) = bénin classé malin  → biopsie inutile, stress, coût
-    # → En oncologie, on accepte plus de FP pour éviter les FN.
-    # → On optimise la Sensibilité (recall) au détriment de la Spécificité.
+    Pourquoi un FN est-il bien plus grave qu'un FP en médecine ?
+    - FN (Faux Négatif) = un cancer classé bénin → le patient n'est pas traité → danger vital
+    - FP (Faux Positif) = un bénin classé malin  → biopsie inutile, stress, coût, mais réversible
+    En oncologie, on préfère accepter plus de FP pour éviter de rater des cancers.
+    On optimise donc la Sensibilité (= taux de vrais positifs) même si ça génère plus de FP.
 
-    # Comment adapter le seuil de décision ?
-    # Seuil par défaut = 0.5 → équilibré.
-    # Baisser à 0.3 : + de prédictions "malin" → + de sensibilité, + de FP.
-    # La courbe ROC permet de choisir le seuil selon le trade-off acceptable.
+    Comment adapter le seuil de décision ?
+    - Par défaut : seuil = 0.5 (équilibré entre sensibilité et spécificité)
+    - Baisser à 0.3 : plus de prédictions "malin" → sensibilité augmente, mais aussi les FP
+    - La courbe ROC permet de choisir le meilleur seuil selon le compromis acceptable
 
-    # Pondération des classes :
-    # pos_weight = n_bénins / n_malins > 1 → pénalise davantage les erreurs sur malins.
+    pos_weight = nb_bénins / nb_malins : on pénalise davantage les erreurs sur les cas malins
+    pour compenser le déséquilibre des classes (il y a souvent plus de cas bénins).
     """
     try:
         import torch
@@ -176,7 +178,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n  Device : {device}")
 
-    # Tenseurs (N, C, H, W)
+    # Conversion au format PyTorch (N, C, H, W)
     x_tr = torch.tensor(X_train.transpose(0, 3, 1, 2), dtype=torch.float32)
     x_te = torch.tensor(X_test.transpose(0, 3, 1, 2),  dtype=torch.float32)
     y_tr = torch.tensor(y_train, dtype=torch.float32)
@@ -202,7 +204,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25
             self.conv4 = nn.Conv2d(128, 128, 3, padding=1)
             self.bn4   = nn.BatchNorm2d(128)
             self.pool3 = nn.MaxPool2d(2, 2)
-            # Tête de classification
+            # Tête de classification binaire
             self.fc1  = nn.Linear(128 * 16 * 16, 256)
             self.fc2  = nn.Linear(256, 1)
             self.relu = nn.ReLU()
@@ -218,7 +220,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25
             x = self.pool3(x)
             x = torch.flatten(x, 1)
             x = self.drop(self.relu(self.fc1(x)))
-            return self.fc2(x)   # logits bruts
+            return self.fc2(x)   # logits bruts (pas de sigmoid ici, géré par la loss)
 
     model     = CNN_Mammography().to(device)
     n_params  = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -275,7 +277,6 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25
     y_pred  = np.array(all_preds)
     y_probs = np.array(all_probs)
 
-    # Courbes d'entraînement
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
     ax1.plot(hist['loss_tr'], label='Train'); ax1.plot(hist['loss_te'], label='Test')
     ax1.set_title('Loss — Mammographie'); ax1.set_xlabel('Epoch'); ax1.legend()
@@ -295,13 +296,17 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids, epochs=25
 
 def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5):
     """
-    Métriques médicales complètes.
+    Métriques médicales complètes pour la détection de cancer.
 
-    Discussion clinique obligatoire :
-    - FN (cancer non détecté) : potentiellement fatal si le patient n'est pas traité.
-    - FP (fausse alarme) : biopsie inutile, stress, coût élevé, mais réversible.
-    - Contexte clinique acceptable : Sensibilité ≥ 0.90, quitte à avoir Spécificité ≈ 0.70.
-    - Seuil de décision : descendre sous 0.5 augmente la sensibilité au prix de plus de FP.
+    Rappel des 4 cas possibles :
+    - TP (Vrai Positif)  : cancer détecté correctement
+    - TN (Vrai Négatif)  : bénin détecté correctement
+    - FP (Faux Positif)  : bénin classé malin → biopsie inutile, mais patient averti
+    - FN (Faux Négatif)  : cancer classé bénin → non traité → potentiellement fatal
+
+    En pratique clinique, on accepte une sensibilité ≥ 90% même si la spécificité baisse,
+    car rater un cancer (FN) est bien plus grave qu'une fausse alarme (FP).
+    Le seuil optimal peut être déterminé via la courbe ROC (critère de Youden).
     """
     y_pred_bin = (y_pred >= seuil).astype(int) if y_pred.max() <= 1.0 else y_pred.astype(int)
 
@@ -334,7 +339,7 @@ def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5):
     else:
         print(f"  ✅ Sensibilité acceptable (≥ 85%)")
 
-    # Matrice de confusion visuelle
+    # Matrice de confusion visuelle sous forme de heatmap
     mat = np.array([[TN, FP], [FN, TP]])
     labels_ax = ['Bénin', 'Malin']
     fig, ax = plt.subplots(figsize=(5, 4))
@@ -353,7 +358,7 @@ def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5):
     plt.show()
     print("  Figure sauvegardée : rapport/p3_confusion.png")
 
-    # Courbe ROC + seuil optimal
+    # Courbe ROC + seuil optimal par critère de Youden (max de sensibilité - (1-spécificité))
     if y_probs is not None:
         try:
             from sklearn.metrics import roc_auc_score, roc_curve
@@ -361,7 +366,7 @@ def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5):
             print(f"\n  AUC-ROC : {auc:.4f}")
 
             fpr, tpr, thresholds = roc_curve(y_true, y_probs)
-            idx_opt = np.argmax(tpr - fpr)   # critère de Youden
+            idx_opt   = np.argmax(tpr - fpr)   # critère de Youden : maximise J = sensibilité + spécificité - 1
             seuil_opt = thresholds[idx_opt]
 
             print(f"  Seuil optimal (Youden J) : {seuil_opt:.3f}")
@@ -410,7 +415,6 @@ def menu_partie3():
         csv_test = 'mass_case_description_test_set.csv'
     img_dir = input("  Dossier images [.] : ").strip() or '.'
 
-    # Chargement ou données synthétiques
     mode = "synthétique"
     if os.path.exists(csv_train):
         result = charger_cbis_ddsm(csv_train, csv_test, img_dir)

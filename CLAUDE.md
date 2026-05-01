@@ -16,7 +16,7 @@ Ne jamais utiliser `/opt/homebrew/bin/python3` (Python 3.14, incompatible avec T
 ```
 main.py              ← menu principal (entrée unique)
 utils.py             ← fonctions NumPy partagées (softmax, cross-entropy, conv, pooling)
-part1_mnist.py       ← Partie 1 : MNIST, modèles NumPy purs, audit du code original
+part1_mnist.py       ← Partie 1 : MNIST, modèles NumPy purs (linéaire, MLP-1, MLP-2)
 part2_cifar10.py     ← Partie 2 : CIFAR-10, filtres, CNN PyTorch
 part3_cbis_ddsm.py   ← Partie 3 : mammographies CBIS-DDSM, métriques médicales
 models.py            ← fichier original du coéquipier (conservé pour référence)
