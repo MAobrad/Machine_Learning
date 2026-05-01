@@ -266,7 +266,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
     optimizer  = optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-4)
     # ReduceLROnPlateau : divise le lr par 2 si la loss test ne diminue pas pendant 3 epochs
     scheduler  = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min',
-                                                       factor=0.5, patience=3, verbose=False)
+                                                       factor=0.5, patience=3)
 
     hist = {'loss_tr': [], 'loss_te': [], 'acc_tr': [], 'acc_te': []}
 
