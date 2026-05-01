@@ -7,6 +7,7 @@ Trois architectures testees : modele lineaire, MLP 1 couche cachee, MLP 2 couche
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import time
 
 # Fixe la graine aleatoire pour avoir des resultats reproductibles a chaque run
 np.random.seed(42)
@@ -14,7 +15,7 @@ os.makedirs('rapport', exist_ok=True)
 
 from utils import (
     one_hot, softmax, cross_entropy, accuracy,
-    xavier_init, he_init, matrice_confusion
+    xavier_init, he_init, matrice_confusion, relu, relu_deriv
 )
 
 
@@ -54,7 +55,73 @@ def charger_mnist():
 
 
 # ============================================================
-# 2. MODELES NumPy PURS
+# 2. AUDIT DU CODE COEQUIPIER
+# ============================================================
+
+def audit_partie1():
+    """Analyse critique du code original du coequipier (models.py)."""
+    print("\n" + "=" * 65)
+    print("  AUDIT DU CODE ORIGINAL — models.py (coequipier)")
+    print("=" * 65)
+
+    print("""
+  ANALYSE POINT PAR POINT :
+  ─────────────────────────────────────────────────────────────
+
+  [OK] softmax() : stabilisation numerique presente
+        Z_stable = Z - np.max(Z, axis=1, keepdims=True)
+        Identique a notre implementation.
+
+  [OK] cross_entropy() : protection log(0) via epsilon=1e-15
+        np.clip(P, 1e-15, 1-1e-15) avant np.log(P)
+
+  [OK] backward() ModeleLineaire : gradient analytique correct
+        dZ = (P - Y) / n,  dA = X.T @ dZ,  db = sum(dZ)
+
+  [OK] ReLU et sa derivee : implementation correcte
+        relu(Z) = max(0, Z)
+        relu_derivative(Z) = (Z > 0).astype(float)
+
+  [PROBLEME 1] Initialisation ModeleLineaire trop petite :
+        Code :    self.A = 0.01 * np.random.randn(input_dim, output_dim)
+        Probleme : la variance est 100x plus petite qu'avec Xavier.
+                   Les gradients au debut sont negligeables, convergence lente.
+        Notre correctif : xavier_init(input_dim, output_dim)
+                          limit = sqrt(6 / (n_in + n_out))
+
+  [PROBLEME 2] Taille des couches cachees sous-dimensionnees :
+        Code :    hidden_dim=64, hidden1=64, hidden2=32
+        Limite :  64 neurones pour 784 dimensions d'entree = goulot d'etranglement
+        Notre correctif : hidden_dim=128, hidden1=128, hidden2=64
+                          (+capacite pour apprendre des representations riches)
+
+  [MANQUANT 1] Pas de get_hidden() dans les modeles MLP
+        Consequence : impossible de visualiser les representations apprises (PCA, t-SNE)
+        Notre ajout  : modele.get_hidden(X) retourne les activations de la derniere couche cachee
+
+  [MANQUANT 2] Pas de matrice de confusion
+        10 classes x 10 classes = 100 combinaisons d'erreurs possibles
+        Indispensable pour identifier les chiffres les plus souvent confondus (ex: 4 vs 9)
+
+  [MANQUANT 3] Pas de visualisation des images mal classees
+        Aide a comprendre visuellement les cas limites du modele
+
+  [MANQUANT 4] Pas de grid search pour trouver les meilleurs hyperparametres
+
+  [MANQUANT 5] Pas d'optimiseur avance (seulement SGD)
+        Adam avec moments d'ordre 1 et 2 converge bien plus vite en pratique
+
+  ─────────────────────────────────────────────────────────────
+  RESUME : Code du coequipier correct sur les briques de base
+  (softmax, cross-entropy, backprop) mais incomplet sur :
+  l'initialisation, la capacite des modeles, les visualisations,
+  et les outils d'analyse. Notre implementation corrige ces 5 points.
+  ─────────────────────────────────────────────────────────────
+""")
+
+
+# ============================================================
+# 3. MODELES NumPy PURS
 # ============================================================
 
 class ModeleLineaire:
@@ -79,8 +146,6 @@ class ModeleLineaire:
     def backward(self, Y):
         # Formule analytique du gradient pour cross-entropy + softmax combines :
         # dL/do = (P - Y) / n  : resultat direct, pas besoin de chain rule separee
-        # dL/dA = X^T @ dZ
-        # dL/db = somme de dZ sur les exemples du batch
         n = self.X.shape[0]
         dZ = (self.P - Y) / n
         self.dA = self.X.T @ dZ
@@ -89,6 +154,19 @@ class ModeleLineaire:
     def update(self, lr):
         self.A -= lr * self.dA
         self.b -= lr * self.db
+
+    def update_adam(self, state, lr, t, beta1=0.9, beta2=0.999, eps=1e-8):
+        """Mise a jour Adam : adapte le learning rate pour chaque parametre."""
+        for p_name, g_name in [('A', 'dA'), ('b', 'db')]:
+            g = getattr(self, g_name)
+            if p_name not in state:
+                state[p_name] = {'m': np.zeros_like(g), 'v': np.zeros_like(g)}
+            s = state[p_name]
+            s['m'] = beta1 * s['m'] + (1 - beta1) * g
+            s['v'] = beta2 * s['v'] + (1 - beta2) * g ** 2
+            m_hat = s['m'] / (1 - beta1 ** t)
+            v_hat = s['v'] / (1 - beta2 ** t)
+            setattr(self, p_name, getattr(self, p_name) - lr * m_hat / (np.sqrt(v_hat) + eps))
 
     def predict(self, X):
         return np.argmax(softmax(X @ self.A + self.b), axis=1)
@@ -114,31 +192,22 @@ class ModeleUneCoucheCachee:
         self.W2 = he_init(hidden_dim, output_dim)
         self.b2 = np.zeros((1, output_dim))
 
-    def _relu(self, Z):
-        return np.maximum(0, Z)
-
-    def _relu_deriv(self, Z):
-        # Derivee de ReLU : 1 la ou Z > 0, 0 partout ailleurs
-        return (Z > 0).astype(np.float32)
-
     def forward(self, X):
         self.X = X
         self.Z1 = X @ self.W1 + self.b1
-        self.H = self._relu(self.Z1)
+        self.H = relu(self.Z1)
         self.Z2 = self.H @ self.W2 + self.b2
         self.P = softmax(self.Z2)
         return self.P
 
     def backward(self, Y):
-        # Retropropagation couche par couche, du dernier vers le premier :
-        # 1. Gradient de la couche de sortie
+        # Retropropagation couche par couche, du dernier vers le premier
         n = self.X.shape[0]
         dZ2 = (self.P - Y) / n
         self.dW2 = self.H.T @ dZ2
         self.db2 = np.sum(dZ2, axis=0, keepdims=True)
-        # 2. On propage vers la couche cachee en passant par la derivee de ReLU
         dH = dZ2 @ self.W2.T
-        dZ1 = dH * self._relu_deriv(self.Z1)
+        dZ1 = dH * relu_deriv(self.Z1)
         self.dW1 = self.X.T @ dZ1
         self.db1 = np.sum(dZ1, axis=0, keepdims=True)
 
@@ -148,13 +217,25 @@ class ModeleUneCoucheCachee:
         self.W2 -= lr * self.dW2
         self.b2 -= lr * self.db2
 
+    def update_adam(self, state, lr, t, beta1=0.9, beta2=0.999, eps=1e-8):
+        for p_name, g_name in [('W1', 'dW1'), ('b1', 'db1'), ('W2', 'dW2'), ('b2', 'db2')]:
+            g = getattr(self, g_name)
+            if p_name not in state:
+                state[p_name] = {'m': np.zeros_like(g), 'v': np.zeros_like(g)}
+            s = state[p_name]
+            s['m'] = beta1 * s['m'] + (1 - beta1) * g
+            s['v'] = beta2 * s['v'] + (1 - beta2) * g ** 2
+            m_hat = s['m'] / (1 - beta1 ** t)
+            v_hat = s['v'] / (1 - beta2 ** t)
+            setattr(self, p_name, getattr(self, p_name) - lr * m_hat / (np.sqrt(v_hat) + eps))
+
     def predict(self, X):
-        H = self._relu(X @ self.W1 + self.b1)
+        H = relu(X @ self.W1 + self.b1)
         return np.argmax(softmax(H @ self.W2 + self.b2), axis=1)
 
     def get_hidden(self, X):
         # Retourne les representations de la couche cachee (utilise pour PCA / t-SNE)
-        return self._relu(X @ self.W1 + self.b1)
+        return relu(X @ self.W1 + self.b1)
 
 
 class ModeleDeuxCouchesCachees:
@@ -164,8 +245,7 @@ class ModeleDeuxCouchesCachees:
 
     Note sur le gradient vanishing :
     En retropropagation, le gradient est multiplie a chaque couche par la derivee de l'activation.
-    Avec Sigmoid (derivee <= 0.25), il decroit exponentiellement sur plusieurs couches,
-    les premieres couches n'apprennent pratiquement plus rien.
+    Avec Sigmoid (derivee <= 0.25), il decroit exponentiellement sur plusieurs couches.
     Avec ReLU, ce probleme est largement attenue puisque la derivee vaut 1 pour x > 0.
     """
 
@@ -177,36 +257,29 @@ class ModeleDeuxCouchesCachees:
         self.W3 = he_init(hidden2, output_dim)
         self.b3 = np.zeros((1, output_dim))
 
-    def _relu(self, Z):
-        return np.maximum(0, Z)
-
-    def _relu_deriv(self, Z):
-        return (Z > 0).astype(np.float32)
-
     def forward(self, X):
         self.X = X
         self.Z1 = X @ self.W1 + self.b1
-        self.H1 = self._relu(self.Z1)
+        self.H1 = relu(self.Z1)
         self.Z2 = self.H1 @ self.W2 + self.b2
-        self.H2 = self._relu(self.Z2)
+        self.H2 = relu(self.Z2)
         self.Z3 = self.H2 @ self.W3 + self.b3
         self.P = softmax(self.Z3)
         return self.P
 
     def backward(self, Y):
-        # Meme principe que MLP-1 mais avec une couche de plus a retropropager
         n = self.X.shape[0]
         dZ3 = (self.P - Y) / n
         self.dW3 = self.H2.T @ dZ3
         self.db3 = np.sum(dZ3, axis=0, keepdims=True)
 
         dH2 = dZ3 @ self.W3.T
-        dZ2 = dH2 * self._relu_deriv(self.Z2)
+        dZ2 = dH2 * relu_deriv(self.Z2)
         self.dW2 = self.H1.T @ dZ2
         self.db2 = np.sum(dZ2, axis=0, keepdims=True)
 
         dH1 = dZ2 @ self.W2.T
-        dZ1 = dH1 * self._relu_deriv(self.Z1)
+        dZ1 = dH1 * relu_deriv(self.Z1)
         self.dW1 = self.X.T @ dZ1
         self.db1 = np.sum(dZ1, axis=0, keepdims=True)
 
@@ -218,35 +291,55 @@ class ModeleDeuxCouchesCachees:
         self.W3 -= lr * self.dW3
         self.b3 -= lr * self.db3
 
+    def update_adam(self, state, lr, t, beta1=0.9, beta2=0.999, eps=1e-8):
+        pairs = [('W1','dW1'),('b1','db1'),('W2','dW2'),('b2','db2'),('W3','dW3'),('b3','db3')]
+        for p_name, g_name in pairs:
+            g = getattr(self, g_name)
+            if p_name not in state:
+                state[p_name] = {'m': np.zeros_like(g), 'v': np.zeros_like(g)}
+            s = state[p_name]
+            s['m'] = beta1 * s['m'] + (1 - beta1) * g
+            s['v'] = beta2 * s['v'] + (1 - beta2) * g ** 2
+            m_hat = s['m'] / (1 - beta1 ** t)
+            v_hat = s['v'] / (1 - beta2 ** t)
+            setattr(self, p_name, getattr(self, p_name) - lr * m_hat / (np.sqrt(v_hat) + eps))
+
     def predict(self, X):
-        H1 = self._relu(X @ self.W1 + self.b1)
-        H2 = self._relu(H1 @ self.W2 + self.b2)
+        H1 = relu(X @ self.W1 + self.b1)
+        H2 = relu(H1 @ self.W2 + self.b2)
         return np.argmax(softmax(H2 @ self.W3 + self.b3), axis=1)
 
     def get_hidden(self, X):
         # Representations de la derniere couche cachee (pour PCA / t-SNE)
-        H1 = self._relu(X @ self.W1 + self.b1)
-        return self._relu(H1 @ self.W2 + self.b2)
+        H1 = relu(X @ self.W1 + self.b1)
+        return relu(H1 @ self.W2 + self.b2)
 
 
 # ============================================================
-# 3. BOUCLE D'ENTRAINEMENT
+# 4. BOUCLE D'ENTRAINEMENT
 # ============================================================
 
 def entrainer(modele, x_train, y_train, x_test, y_test,
-              lr=0.1, epochs=50, batch_size=256, verbose=True):
+              lr=0.1, epochs=50, batch_size=256, verbose=True, optimizer='sgd'):
     """
-    Mini-batch SGD : on melange les donnees a chaque epoch, puis on fait des mises
+    Mini-batch SGD (ou Adam) : on melange les donnees a chaque epoch, puis on fait des mises
     a jour par petits groupes (batches) plutot que sur tout le dataset d'un coup.
+
+    optimizer='sgd'  : descente de gradient classique, lr fixe
+    optimizer='adam' : adapte automatiquement le lr pour chaque parametre
+                       via les moments d'ordre 1 (m) et 2 (v). lr conseille : 0.001
 
     Pourquoi un learning rate ni trop grand ni trop petit ?
     - Trop grand : les mises a jour depassent le minimum, la loss oscille ou diverge
     - Trop petit : convergence tres lente, on peut rester bloque dans un minimum local
-    - Bonne pratique : commencer a 0.1 et diviser par 10 si on voit une instabilite
     """
     y_train_oh = one_hot(y_train, 10)
     n = x_train.shape[0]
     hist = {'loss': [], 'err_train': [], 'err_test': []}
+
+    adam_state = {}
+    adam_t = 0
+    t0 = time.time()
 
     for ep in range(epochs):
         # Melange aleatoire a chaque epoch pour que le modele ne memorise pas l'ordre
@@ -259,7 +352,11 @@ def entrainer(modele, x_train, y_train, x_test, y_test,
             Yb = y_sh[s:s+batch_size]
             modele.forward(Xb)
             modele.backward(Yb)
-            modele.update(lr)
+            if optimizer == 'adam':
+                adam_t += 1
+                modele.update_adam(adam_state, lr, adam_t)
+            else:
+                modele.update(lr)
 
         P_tr = modele.forward(x_train)
         loss = cross_entropy(y_train_oh, P_tr)
@@ -271,19 +368,22 @@ def entrainer(modele, x_train, y_train, x_test, y_test,
         hist['err_test'].append(err_te)
 
         if verbose and (ep + 1) % 10 == 0:
+            elapsed = time.time() - t0
             print(f"  Epoch {ep+1:3d}/{epochs} | Loss: {loss:.4f} | "
-                  f"Err train: {err_tr:.4f} | Err test: {err_te:.4f}")
+                  f"Err train: {err_tr:.4f} ({(1-err_tr)*100:.1f}%) | "
+                  f"Err test: {err_te:.4f} ({(1-err_te)*100:.1f}%) | "
+                  f"{elapsed:.0f}s")
 
+    print(f"  Termine en {time.time() - t0:.1f}s — "
+          f"Accuracy test finale : {(1-hist['err_test'][-1])*100:.2f}%")
     return hist
 
 
 # ============================================================
-# 4. VISUALISATIONS
+# 5. VISUALISATIONS
 # ============================================================
 
 def afficher_courbes(hist, titre, fichier=None):
-    # On trace la loss et le taux d'erreur train/test en fonction des epochs
-    # Si la courbe test decroche vers le haut : overfitting
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
     ax1.plot(hist['loss'], color='steelblue')
     ax1.set_title('Fonction de cout (cross-entropy)')
@@ -306,8 +406,6 @@ def afficher_courbes(hist, titre, fichier=None):
 
 
 def afficher_matrice_confusion(y_true, y_pred, titre, fichier=None):
-    # Heatmap 10x10 : chaque case (i,j) = nombre d'images du chiffre i classees comme j
-    # La diagonale = les bonnes predictions. Les cases hors diagonale = les erreurs
     mat = matrice_confusion(y_true, y_pred, n_classes=10)
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.imshow(mat, cmap='Blues')
@@ -329,8 +427,6 @@ def afficher_matrice_confusion(y_true, y_pred, titre, fichier=None):
 
 
 def afficher_erreurs(modele, x_test, y_test, titre, fichier=None):
-    # On affiche les 10 premieres images que le modele a mal classees
-    # Utile pour comprendre visuellement quels cas posent probleme
     y_pred = modele.predict(x_test)
     erreurs = np.where(y_pred != y_test)[0]
     fig, axes = plt.subplots(2, 5, figsize=(12, 5))
@@ -348,8 +444,6 @@ def afficher_erreurs(modele, x_test, y_test, titre, fichier=None):
 
 
 def afficher_pca(modele, x_test, y_test, titre, fichier=None):
-    # PCA = reduction de dimension lineaire, on projette les representations sur 2 axes
-    # Si les chiffres forment des clusters bien separes, le modele a bien appris a les distinguer
     try:
         from sklearn.decomposition import PCA
     except ImportError:
@@ -379,8 +473,6 @@ def afficher_pca(modele, x_test, y_test, titre, fichier=None):
 
 
 def afficher_tsne(modele, x_test, y_test, titre, fichier=None):
-    # t-SNE = reduction de dimension non-lineaire, meilleure que PCA pour visualiser des clusters
-    # Plus lente a calculer (1-2 min) mais les groupes de chiffres apparaissent plus clairement
     try:
         from sklearn.manifold import TSNE
     except ImportError:
@@ -408,26 +500,24 @@ def afficher_tsne(modele, x_test, y_test, titre, fichier=None):
 
 
 # ============================================================
-# 5. GRID SEARCH
+# 6. GRID SEARCH
 # ============================================================
 
 def grid_search(x_train, y_train, x_test, y_test):
-    # On teste toutes les combinaisons architectures x learning rates
-    # pour trouver empiriquement la meilleure configuration sur le test set
     configs = [
-        {'nom': 'Lineaire', 'modele': ModeleLineaire(), 'lr': 0.1},
+        {'nom': 'Lineaire      SGD', 'modele': ModeleLineaire(), 'lr': 0.1, 'opt': 'sgd'},
     ]
     for h in [64, 128, 256]:
-        for lr in [0.01, 0.1]:
+        for lr, opt in [(0.1, 'sgd'), (0.001, 'adam')]:
             configs.append({
-                'nom': f'MLP-1 h={h} lr={lr}',
-                'modele': ModeleUneCoucheCachee(hidden_dim=h), 'lr': lr
+                'nom': f'MLP-1 h={h:3d} {opt.upper()}',
+                'modele': ModeleUneCoucheCachee(hidden_dim=h), 'lr': lr, 'opt': opt
             })
     for h1, h2 in [(128, 64), (256, 128)]:
-        for lr in [0.01, 0.1]:
+        for lr, opt in [(0.1, 'sgd'), (0.001, 'adam')]:
             configs.append({
-                'nom': f'MLP-2 {h1}/{h2} lr={lr}',
-                'modele': ModeleDeuxCouchesCachees(hidden1=h1, hidden2=h2), 'lr': lr
+                'nom': f'MLP-2 {h1}/{h2} {opt.upper()}',
+                'modele': ModeleDeuxCouchesCachees(hidden1=h1, hidden2=h2), 'lr': lr, 'opt': opt
             })
 
     resultats = []
@@ -436,7 +526,7 @@ def grid_search(x_train, y_train, x_test, y_test):
     for cfg in configs:
         print(f"\n  {cfg['nom']}")
         hist = entrainer(cfg['modele'], x_train, y_train, x_test, y_test,
-                         lr=cfg['lr'], epochs=10, verbose=False)
+                         lr=cfg['lr'], epochs=10, verbose=False, optimizer=cfg['opt'])
         err_tr = hist['err_train'][-1]
         err_te = hist['err_test'][-1]
         print(f"    Err train: {err_tr:.4f}  Err test: {err_te:.4f}")
@@ -444,18 +534,19 @@ def grid_search(x_train, y_train, x_test, y_test):
         if meilleur is None or err_te < meilleur['err_test']:
             meilleur = resultats[-1]
 
-    print("\n" + "=" * 55)
+    print("\n" + "=" * 62)
     print(f"  {'Architecture':<35} {'Train':>8} {'Test':>8}")
-    print("  " + "-" * 52)
+    print("  " + "-" * 54)
     for r in resultats:
         print(f"  {r['nom']:<35} {r['err_train']:>8.4f} {r['err_test']:>8.4f}")
     print(f"\n  Meilleure : {meilleur['nom']}")
-    print(f"  Err test  : {meilleur['err_test']:.4f}")
+    print(f"  Err test  : {meilleur['err_test']:.4f}  "
+          f"({(1-meilleur['err_test'])*100:.2f}% accuracy)")
     return meilleur, resultats
 
 
 # ============================================================
-# 6. MENU PARTIE 1
+# 7. MENU PARTIE 1
 # ============================================================
 
 def menu_partie1():
@@ -463,20 +554,22 @@ def menu_partie1():
     x_train, y_train, x_test, y_test = charger_mnist()
 
     while True:
-        print("\n" + "=" * 48)
+        print("\n" + "=" * 52)
         print("   PARTIE 1 - Classification MNIST (NumPy)")
-        print("=" * 48)
+        print("=" * 52)
         print("  1  - Modele lineaire  (train + courbes)")
-        print("  2  - MLP 1 couche cachee (h=128)")
-        print("  3  - MLP 2 couches cachees (128/64)")
+        print("  2  - MLP 1 couche cachee (h=128, SGD)")
+        print("  3  - MLP 2 couches cachees (128/64, SGD)")
         print("  4  - Comparer les 3 modeles")
         print("  5  - Matrice de confusion")
         print("  6  - Images mal classees")
         print("  7  - Visualisation PCA 2D")
         print("  8  - Visualisation t-SNE")
-        print("  9  - Grid search complet")
+        print("  9  - Grid search complet (SGD + Adam)")
+        print("  a  - Audit du code coequipier (models.py)")
+        print("  b  - Comparaison SGD vs Adam (MLP-2)")
         print("  0  - Retour au menu principal")
-        print("-" * 48)
+        print("-" * 52)
 
         choix = input("Choix : ").strip()
 
@@ -484,36 +577,29 @@ def menu_partie1():
             modele = ModeleLineaire()
             hist = entrainer(modele, x_train, y_train, x_test, y_test, lr=0.1, epochs=50)
             afficher_courbes(hist, 'Modele Lineaire MNIST', 'p1_lineaire_courbes.png')
-            print(f"\n  Err train : {hist['err_train'][-1]:.4f}")
-            print(f"  Err test  : {hist['err_test'][-1]:.4f}")
 
         elif choix == '2':
             modele = ModeleUneCoucheCachee(hidden_dim=128)
             hist = entrainer(modele, x_train, y_train, x_test, y_test, lr=0.1, epochs=50)
             afficher_courbes(hist, 'MLP 1 couche (h=128)', 'p1_mlp1_courbes.png')
-            print(f"\n  Err train : {hist['err_train'][-1]:.4f}")
-            print(f"  Err test  : {hist['err_test'][-1]:.4f}")
 
         elif choix == '3':
             modele = ModeleDeuxCouchesCachees(hidden1=128, hidden2=64)
             hist = entrainer(modele, x_train, y_train, x_test, y_test, lr=0.1, epochs=50)
             afficher_courbes(hist, 'MLP 2 couches (128/64)', 'p1_mlp2_courbes.png')
-            print(f"\n  Err train : {hist['err_train'][-1]:.4f}")
-            print(f"  Err test  : {hist['err_test'][-1]:.4f}")
 
         elif choix == '4':
             configs = [
-                ('Lineaire', ModeleLineaire(), 0.1),
-                ('MLP-1 (h=128)', ModeleUneCoucheCachee(hidden_dim=128), 0.1),
-                ('MLP-2 (128/64)', ModeleDeuxCouchesCachees(128, 64), 0.1),
+                ('Lineaire', ModeleLineaire(), 0.1, 'sgd'),
+                ('MLP-1 (h=128)', ModeleUneCoucheCachee(hidden_dim=128), 0.1, 'sgd'),
+                ('MLP-2 (128/64)', ModeleDeuxCouchesCachees(128, 64), 0.1, 'sgd'),
             ]
             resultats = []
-            for nom, modele, lr in configs:
+            for nom, modele, lr, opt in configs:
                 print(f"\nEntrainement : {nom}")
                 hist = entrainer(modele, x_train, y_train, x_test, y_test,
-                                 lr=lr, epochs=50, verbose=False)
-                print(f"  Err train: {hist['err_train'][-1]:.4f}  "
-                      f"Err test: {hist['err_test'][-1]:.4f}")
+                                 lr=lr, epochs=50, verbose=False, optimizer=opt)
+                print(f"  Accuracy test: {(1-hist['err_test'][-1])*100:.2f}%")
                 resultats.append((nom, hist))
 
             fig, ax = plt.subplots(figsize=(10, 5))
@@ -560,6 +646,40 @@ def menu_partie1():
 
         elif choix == '9':
             grid_search(x_train, y_train, x_test, y_test)
+
+        elif choix == 'a':
+            audit_partie1()
+
+        elif choix == 'b':
+            print("\nComparaison SGD vs Adam sur MLP-2 (128/64), 30 epochs")
+            print("─" * 52)
+            print("  SGD (lr=0.1)...")
+            m_sgd = ModeleDeuxCouchesCachees(128, 64)
+            h_sgd = entrainer(m_sgd, x_train, y_train, x_test, y_test,
+                              lr=0.1, epochs=30, verbose=False, optimizer='sgd')
+            print("  Adam (lr=0.001)...")
+            m_adam = ModeleDeuxCouchesCachees(128, 64)
+            h_adam = entrainer(m_adam, x_train, y_train, x_test, y_test,
+                               lr=0.001, epochs=30, verbose=False, optimizer='adam')
+
+            fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+            axes[0].plot(h_sgd['loss'], label='SGD', color='steelblue')
+            axes[0].plot(h_adam['loss'], label='Adam', color='tomato')
+            axes[0].set_title('Loss — SGD vs Adam')
+            axes[0].set_xlabel('Epoch')
+            axes[0].legend()
+            axes[1].plot(h_sgd['err_test'], label='SGD', color='steelblue')
+            axes[1].plot(h_adam['err_test'], label='Adam', color='tomato')
+            axes[1].set_title("Erreur test — SGD vs Adam")
+            axes[1].set_xlabel('Epoch')
+            axes[1].legend()
+            plt.suptitle('Comparaison optimiseurs — MLP-2 MNIST', fontsize=13)
+            plt.tight_layout()
+            plt.savefig('rapport/p1_sgd_vs_adam.png', dpi=150, bbox_inches='tight')
+            plt.show()
+            print("  Figure sauvegardee : rapport/p1_sgd_vs_adam.png")
+            print(f"\n  SGD  — Accuracy test : {(1-h_sgd['err_test'][-1])*100:.2f}%")
+            print(f"  Adam — Accuracy test : {(1-h_adam['err_test'][-1])*100:.2f}%")
 
         elif choix == '0':
             break

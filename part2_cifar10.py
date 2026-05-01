@@ -119,21 +119,23 @@ def etudes_preliminaires(x_train, y_train, x_test, y_test):
                          lr=lr, epochs=10, batch_size=256, verbose=False)
         err_tr = hist['err_train'][-1]
         err_te = hist['err_test'][-1]
-        print(f"    Err train: {err_tr:.4f}  Err test: {err_te:.4f}")
+        print(f"    Err train: {err_tr:.4f}  Err test: {err_te:.4f}  "
+              f"(Acc test: {(1-err_te)*100:.1f}%)")
         resultats.append((nom, inp, err_tr, err_te))
 
-    print("\n" + "=" * 65)
-    print(f"  {'Architecture':<22} {'Input':<9} {'Err train':>10} {'Err test':>10}")
-    print("  " + "-" * 54)
+    print("\n" + "=" * 68)
+    print(f"  {'Architecture':<22} {'Input':<9} {'Err train':>10} {'Err test':>10} {'Acc test':>9}")
+    print("  " + "-" * 63)
     for nom, inp, err_tr, err_te in resultats:
-        print(f"  {nom:<22} {inp:<9} {err_tr:>10.4f} {err_te:>10.4f}")
+        print(f"  {nom:<22} {inp:<9} {err_tr:>10.4f} {err_te:>10.4f} {(1-err_te)*100:>8.1f}%")
 
     print("\n  Benchmarks CIFAR-10 (etat de l'art) :")
-    print("    Deep Belief Networks  (2010) : 21.1%")
-    print("    Maxout Networks       (2013) :  9.38%")
-    print("    ViT Vision Transformer(2021) :  0.5%")
+    print("    Deep Belief Networks  (2010) : 21.1%  erreur → 78.9% accuracy")
+    print("    Maxout Networks       (2013) :  9.38% erreur → 90.6% accuracy")
+    print("    ViT Vision Transformer(2021) :  0.5%  erreur → 99.5% accuracy")
+    print("\n  → Les MLP sans convolutions n'apprennent pas l'invariance spatiale.")
+    print("    Le CNN (option 5) exploite cette structure pour depasser 75%.")
 
-    # Graphique comparatif gris vs couleur pour les 3 architectures
     labels = [f"{n}\n({i})" for n, i, _, _ in resultats]
     errs_te = [r[3] for r in resultats]
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -155,7 +157,6 @@ def etudes_preliminaires(x_train, y_train, x_test, y_test):
 # 4. DEMONSTRATION - 6 FILTRES DE CONVOLUTION
 # ============================================================
 
-# Les 6 filtres qu'on va appliquer sur une image CIFAR en niveaux de gris
 FILTRES = {
     'K1 - Flou (moyenne)':      (1/9) * np.ones((3, 3)),
     'K2 - Nettete':             np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=float),
@@ -221,7 +222,7 @@ def demo_convolution_couleur(x_train_raw):
     img = x_train_raw[0].astype(np.float32) / 255.0
 
     sobel = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
-    kernels_rgb = np.stack([sobel, sobel, sobel], axis=-1)   # meme filtre sur les 3 canaux
+    kernels_rgb = np.stack([sobel, sobel, sobel], axis=-1)
     feature_map = convolve2d_color(img, kernels_rgb)
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
@@ -268,6 +269,23 @@ def demo_max_pooling(x_train_raw):
     print("  Figure sauvegardee : rapport/p2_maxpooling.png")
 
 
+def afficher_exemples_cifar(x_train_raw, y_train):
+    """Affiche une grille d'exemples (8 images par classe) pour visualiser CIFAR-10."""
+    fig, axes = plt.subplots(10, 8, figsize=(14, 18))
+    for classe in range(10):
+        indices = np.where(y_train == classe)[0][:8]
+        for j, idx in enumerate(indices):
+            axes[classe, j].imshow(x_train_raw[idx].astype(np.uint8))
+            axes[classe, j].axis('off')
+        axes[classe, 0].set_ylabel(CLASSES_CIFAR[classe], fontsize=9,
+                                    rotation=0, ha='right', va='center')
+    plt.suptitle('Exemples CIFAR-10 par classe (8 images)', fontsize=14)
+    plt.tight_layout()
+    plt.savefig('rapport/p2_exemples.png', dpi=120, bbox_inches='tight')
+    plt.show()
+    print("  Figure sauvegardee : rapport/p2_exemples.png")
+
+
 # ============================================================
 # 5. CNN PYTORCH (Option B)
 # ============================================================
@@ -275,21 +293,28 @@ def demo_max_pooling(x_train_raw):
 def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
     """
     CNN complet CIFAR-10 avec PyTorch.
-    Architecture : Conv1(3->64), BN, ReLU, Conv2(64->64), BN, ReLU, MaxPool,
-                   Conv3, BN, ReLU, MaxPool, Conv4, BN, ReLU, Flatten, Dropout, FC(10)
+    Architecture amelioree :
+      Bloc 1 : Conv(3→64), BN, ReLU, Conv(64→64), BN, ReLU, MaxPool → 16x16
+      Bloc 2 : Conv(64→128), BN, ReLU, Conv(128→128), BN, ReLU, MaxPool → 8x8
+      Bloc 3 : Conv(128→256), BN, ReLU, MaxPool → 4x4
+      Tete   : Dropout(0.4), FC(256*4*4→512), ReLU, Dropout(0.3), FC(512→10)
 
     Qu'est-ce que l'overfitting et comment le Dropout le limite ?
-    Overfitting = le modele memorise le train set au lieu de generaliser (train acc >> test acc).
+    Overfitting = le modele memorise le train set au lieu de generaliser (train >> test).
     Dropout : a chaque forward pass, on desactive aleatoirement p% des neurones.
     Le reseau ne peut plus dependre d'un seul neurone, il apprend des representations
-    plus robustes et distribuees, ce qui ameliore la generalisation sur le test set.
-    On detecte l'overfitting si acc_train - acc_test depasse ~10%.
+    plus robustes et distribuees → meilleure generalisation.
+
+    Data augmentation : on genere de nouvelles variantes d'images a chaque epoch
+    (flip horizontal, decoupage aleatoire) pour que le modele ne memorise pas les images
+    exactes du train set. Augmente artificiellement la taille effective du dataset.
     """
     try:
         import torch
         import torch.nn as nn
+        import torch.nn.functional as F
         import torch.optim as optim
-        from torch.utils.data import TensorDataset, DataLoader
+        from torch.utils.data import Dataset, DataLoader
     except ImportError:
         print("  PyTorch non installe. Executer :")
         print("  venv/bin/pip install torch torchvision")
@@ -299,53 +324,105 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n  Device : {device}")
 
-    # PyTorch attend le format (N, C, H, W), on transpose depuis (N, H, W, C)
-    x_tr = torch.tensor(x_train_raw.transpose(0, 3, 1, 2), dtype=torch.float32) / 255.0
-    x_te = torch.tensor(x_test_raw.transpose(0, 3, 1, 2), dtype=torch.float32) / 255.0
-    y_tr = torch.tensor(y_train, dtype=torch.long)
-    y_te = torch.tensor(y_test, dtype=torch.long)
+    # Statistiques CIFAR-10 pour normalisation (calculees sur le train set)
+    mean = torch.tensor([0.4914, 0.4822, 0.4465]).view(3, 1, 1)
+    std  = torch.tensor([0.2470, 0.2435, 0.2616]).view(3, 1, 1)
 
-    train_loader = DataLoader(TensorDataset(x_tr, y_tr), batch_size=128, shuffle=True, num_workers=0)
-    test_loader = DataLoader(TensorDataset(x_te, y_te), batch_size=256, shuffle=False, num_workers=0)
+    # Conversion (N, H, W, C) → (N, C, H, W) et normalisation
+    x_tr = torch.tensor(x_train_raw.transpose(0, 3, 1, 2), dtype=torch.float32) / 255.0
+    x_te = torch.tensor(x_test_raw.transpose(0, 3, 1, 2),  dtype=torch.float32) / 255.0
+    x_te = (x_te - mean) / std   # pas d'augmentation sur le test set
+    y_tr = torch.tensor(y_train, dtype=torch.long)
+    y_te = torch.tensor(y_test,  dtype=torch.long)
+
+    class AugmentedDataset(Dataset):
+        """Dataset avec data augmentation aleatoire a chaque epoch."""
+        def __init__(self, x, y, augment=True):
+            self.x = x
+            self.y = y
+            self.augment = augment
+            self.mean = mean
+            self.std  = std
+
+        def __len__(self):
+            return len(self.x)
+
+        def __getitem__(self, idx):
+            img = self.x[idx].clone()
+            if self.augment:
+                # Flip horizontal aleatoire (probabilite 50%)
+                if torch.rand(1).item() > 0.5:
+                    img = torch.flip(img, dims=[2])
+                # Crop aleatoire avec padding 4 pixels (padding reflectif)
+                pad = 4
+                img = F.pad(img, (pad, pad, pad, pad), mode='reflect')
+                i = torch.randint(0, 2 * pad, (1,)).item()
+                j = torch.randint(0, 2 * pad, (1,)).item()
+                img = img[:, i:i+32, j:j+32]
+            img = (img - self.mean) / self.std
+            return img, self.y[idx]
+
+    train_loader = DataLoader(AugmentedDataset(x_tr, y_tr, augment=True),
+                              batch_size=128, shuffle=True, num_workers=0)
+    test_loader  = DataLoader(AugmentedDataset(x_te, y_te, augment=False),
+                              batch_size=256, shuffle=False, num_workers=0)
 
     class CNN_CIFAR10(nn.Module):
         def __init__(self):
             super().__init__()
-            self.conv1 = nn.Conv2d(3, 64, 3, padding=1)
-            self.bn1 = nn.BatchNorm2d(64)
-            self.conv2 = nn.Conv2d(64, 64, 3, padding=1)
-            self.bn2 = nn.BatchNorm2d(64)
-            self.pool1 = nn.MaxPool2d(2, 2)    # 32 -> 16
-            self.conv3 = nn.Conv2d(64, 64, 3, padding=1)
-            self.bn3 = nn.BatchNorm2d(64)
-            self.pool2 = nn.MaxPool2d(2, 2)    # 16 -> 8
-            self.conv4 = nn.Conv2d(64, 64, 3, padding=1)
-            self.bn4 = nn.BatchNorm2d(64)
-            self.drop = nn.Dropout(0.3)
-            self.fc = nn.Linear(64 * 8 * 8, 10)
-            self.relu = nn.ReLU()
+            # Bloc 1 : 32x32 → 16x16
+            self.conv1 = nn.Conv2d(3,   64,  3, padding=1)
+            self.bn1   = nn.BatchNorm2d(64)
+            self.conv2 = nn.Conv2d(64,  64,  3, padding=1)
+            self.bn2   = nn.BatchNorm2d(64)
+            self.pool1 = nn.MaxPool2d(2, 2)
+            # Bloc 2 : 16x16 → 8x8
+            self.conv3 = nn.Conv2d(64,  128, 3, padding=1)
+            self.bn3   = nn.BatchNorm2d(128)
+            self.conv4 = nn.Conv2d(128, 128, 3, padding=1)
+            self.bn4   = nn.BatchNorm2d(128)
+            self.pool2 = nn.MaxPool2d(2, 2)
+            # Bloc 3 : 8x8 → 4x4
+            self.conv5 = nn.Conv2d(128, 256, 3, padding=1)
+            self.bn5   = nn.BatchNorm2d(256)
+            self.pool3 = nn.MaxPool2d(2, 2)
+            # Tete de classification
+            self.drop1 = nn.Dropout(0.4)
+            self.fc1   = nn.Linear(256 * 4 * 4, 512)
+            self.drop2 = nn.Dropout(0.3)
+            self.fc2   = nn.Linear(512, 10)
+            self.relu  = nn.ReLU()
 
         def forward(self, x):
             x = self.relu(self.bn1(self.conv1(x)))
             x = self.relu(self.bn2(self.conv2(x)))
             x = self.pool1(x)
             x = self.relu(self.bn3(self.conv3(x)))
-            x = self.pool2(x)
             x = self.relu(self.bn4(self.conv4(x)))
-            x = self.drop(torch.flatten(x, 1))
-            return self.fc(x)   # logits bruts
+            x = self.pool2(x)
+            x = self.relu(self.bn5(self.conv5(x)))
+            x = self.pool3(x)
+            x = self.drop1(torch.flatten(x, 1))
+            x = self.relu(self.fc1(x))
+            x = self.drop2(x)
+            return self.fc2(x)
 
     model = CNN_CIFAR10().to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Parametres du modele : {n_params:,}")
+    print(f"  Architecture : Conv×5 (64→64→128→128→256), 2 FC, BatchNorm + Dropout")
+    print(f"  Data augmentation : flip horizontal + random crop 32x32")
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    # CosineAnnealingLR diminue progressivement le learning rate en suivant une courbe en cosinus
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20)
+    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
+    # CosineAnnealingLR : lr decroit en cosinus de lr_max a lr_min=0 sur T_max epochs
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=25, eta_min=1e-5)
 
-    epochs = 20
+    epochs = 25
     hist = {'loss_tr': [], 'loss_te': [], 'acc_tr': [], 'acc_te': []}
+
+    import time
+    t0 = time.time()
 
     for ep in range(epochs):
         model.train()
@@ -357,12 +434,12 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
             loss = criterion(out, yb)
             loss.backward()
             optimizer.step()
-            loss_s += loss.item() * xb.size(0)
+            loss_s  += loss.item() * xb.size(0)
             correct += (out.argmax(1) == yb).sum().item()
-            total += xb.size(0)
+            total   += xb.size(0)
         scheduler.step()
         loss_tr = loss_s / total
-        acc_tr = correct / total
+        acc_tr  = correct / total
 
         model.eval()
         loss_s2, correct2, total2 = 0.0, 0, 0
@@ -370,20 +447,22 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
             for xb, yb in test_loader:
                 xb, yb = xb.to(device), yb.to(device)
                 out = model(xb)
-                loss_s2 += criterion(out, yb).item() * xb.size(0)
+                loss_s2  += criterion(out, yb).item() * xb.size(0)
                 correct2 += (out.argmax(1) == yb).sum().item()
-                total2 += xb.size(0)
+                total2   += xb.size(0)
         loss_te = loss_s2 / total2
-        acc_te = correct2 / total2
+        acc_te  = correct2 / total2
 
         hist['loss_tr'].append(loss_tr)
         hist['loss_te'].append(loss_te)
         hist['acc_tr'].append(acc_tr)
         hist['acc_te'].append(acc_te)
 
+        elapsed = time.time() - t0
         print(f"  Epoch {ep+1:2d}/{epochs} | "
               f"Loss {loss_tr:.4f}/{loss_te:.4f} | "
-              f"Acc {acc_tr:.4f}/{acc_te:.4f}")
+              f"Acc {acc_tr:.4f}/{acc_te:.4f} | "
+              f"{elapsed:.0f}s")
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
     ax1.plot(hist['loss_tr'], label='Train')
@@ -402,8 +481,8 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
     print("  Figure sauvegardee : rapport/p2_cnn_courbes.png")
 
     overfit = hist['acc_tr'][-1] - hist['acc_te'][-1]
-    print(f"\n  Acc train finale : {hist['acc_tr'][-1]:.4f}")
-    print(f"  Acc test finale  : {hist['acc_te'][-1]:.4f}")
+    print(f"\n  Acc train finale : {hist['acc_tr'][-1]:.4f} ({hist['acc_tr'][-1]*100:.1f}%)")
+    print(f"  Acc test finale  : {hist['acc_te'][-1]:.4f} ({hist['acc_te'][-1]*100:.1f}%)")
     if overfit > 0.10:
         print(f"  Overfitting detecte (gap train-test = {overfit:.4f})")
     else:
@@ -421,16 +500,17 @@ def menu_partie2():
     x_train, y_train, x_test, y_test = charger_cifar10()
 
     while True:
-        print("\n" + "=" * 52)
+        print("\n" + "=" * 55)
         print("   PARTIE 2 - CIFAR-10 + Convolutions + CNN")
-        print("=" * 52)
+        print("=" * 55)
         print("  1  - Etudes preliminaires A et B (MLP NumPy)")
         print("  2  - Demo 6 filtres de convolution (N&B)")
         print("  3  - Demo convolution couleur (3 canaux)")
         print("  4  - Demo Max-Pooling 2x2")
-        print("  5  - CNN PyTorch complet (Option B)")
+        print("  5  - CNN PyTorch complet (augmente, 25 epochs)")
+        print("  6  - Apercu images CIFAR-10 par classe")
         print("  0  - Retour au menu principal")
-        print("-" * 52)
+        print("-" * 55)
 
         choix = input("Choix : ").strip()
 
@@ -444,6 +524,8 @@ def menu_partie2():
             demo_max_pooling(x_train)
         elif choix == '5':
             entrainer_cnn_cifar10(x_train, y_train, x_test, y_test)
+        elif choix == '6':
+            afficher_exemples_cifar(x_train, y_train)
         elif choix == '0':
             break
         else:

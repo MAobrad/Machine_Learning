@@ -120,3 +120,15 @@ def max_pooling2x2(feature_map):
         for v in range(W // 2):
             out[u, v] = np.max(feature_map[2*u:2*u+2, 2*v:2*v+2])
     return out
+
+
+# ============================================================
+# ACTIVATIONS
+# ============================================================
+
+def relu(Z):
+    return np.maximum(0, Z)
+
+
+def relu_deriv(Z):
+    return (Z > 0).astype(np.float32)
