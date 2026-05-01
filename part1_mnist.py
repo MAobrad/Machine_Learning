@@ -566,7 +566,6 @@ def menu_partie1():
         print("  7  - Visualisation PCA 2D")
         print("  8  - Visualisation t-SNE")
         print("  9  - Grid search complet (SGD + Adam)")
-        print("  a  - Audit du code coequipier (models.py)")
         print("  b  - Comparaison SGD vs Adam (MLP-2)")
         print("  0  - Retour au menu principal")
         print("-" * 52)
@@ -646,9 +645,6 @@ def menu_partie1():
 
         elif choix == '9':
             grid_search(x_train, y_train, x_test, y_test)
-
-        elif choix == 'a':
-            audit_partie1()
 
         elif choix == 'b':
             print("\nComparaison SGD vs Adam sur MLP-2 (128/64), 30 epochs")
