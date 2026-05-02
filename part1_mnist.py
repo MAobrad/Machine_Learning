@@ -525,7 +525,7 @@ def afficher_tsne(modele, x_test, y_test, titre, fichier=None):
 def grid_search(x_train, y_train, x_test, y_test):
     configs = [
         {'nom': 'Lineaire      SGD', 'modele': ModeleLineaire(), 'lr': 0.1, 'opt': 'sgd'},
-        {'nom': 'Lineaire      ADAM', 'modele': ModeleLineaire(), 'lr': 0.1, 'opt': 'adam'}
+        {'nom': 'Lineaire      ADAM', 'modele': ModeleLineaire(), 'lr': 0.001, 'opt': 'adam'}
     ]
     for h in [64, 128, 256]:
         for lr, opt in [(0.1, 'sgd'), (0.001, 'adam')]:
@@ -612,9 +612,9 @@ def menu_partie1():
                 ('Lineaire', ModeleLineaire(), 0.1, 'sgd'),
                 ('MLP-1 (h=128)', ModeleUneCoucheCachee(hidden_dim=128), 0.1, 'sgd'),
                 ('MLP-2 (128/64)', ModeleDeuxCouchesCachees(hidden1=128, hidden2=64), 0.1, 'sgd'),
-                ('Lineaire', ModeleLineaire(), 0.1),
-                ('MLP-1 (h=128)', ModeleUneCoucheCachee(hidden_dim=128), 0.1),
-                ('MLP-2 (128/64)', ModeleDeuxCouchesCachees(hidden1=128, hidden2=64), 0.1),
+                ('Lineaire', ModeleLineaire(), 0.001, 'adam'),
+                ('MLP-1 (h=128)', ModeleUneCoucheCachee(hidden_dim=128), 0.1, 'adam'),
+                ('MLP-2 (128/64)', ModeleDeuxCouchesCachees(hidden1=128, hidden2=64), 0.1, 'adam'),
             ]
             resultats = []
             for nom, modele, lr, opt in configs:
