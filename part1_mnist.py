@@ -525,6 +525,7 @@ def afficher_tsne(modele, x_test, y_test, titre, fichier=None):
 def grid_search(x_train, y_train, x_test, y_test):
     configs = [
         {'nom': 'Lineaire      SGD', 'modele': ModeleLineaire(), 'lr': 0.1, 'opt': 'sgd'},
+        {'nom': 'Lineaire      ADAM', 'modele': ModeleLineaire(), 'lr': 0.1, 'opt': 'adam'}
     ]
     for h in [64, 128, 256]:
         for lr, opt in [(0.1, 'sgd'), (0.001, 'adam')]:
