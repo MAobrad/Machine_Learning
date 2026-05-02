@@ -214,6 +214,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n  Device : {device}")
 
+    # PyTorch attend (N, C, H, W) : on transpose depuis notre format (N, H, W, C)
     x_tr = torch.tensor(X_train.transpose(0, 3, 1, 2), dtype=torch.float32)
     x_te = torch.tensor(X_test.transpose(0, 3, 1, 2),  dtype=torch.float32)
     y_tr = torch.tensor(y_train, dtype=torch.float32)
@@ -283,6 +284,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
         loss_s, corr, tot = 0.0, 0, 0
         for xb, yb in train_loader:
             xb = xb.to(device)
+            # unsqueeze(1) : passe yb de (batch,) a (batch,1) pour matcher la sortie fc2
             yb = yb.unsqueeze(1).to(device)
             optimizer.zero_grad()
             out  = model(xb)
@@ -303,6 +305,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
                 xb  = xb.to(device)
                 yb2 = yb.unsqueeze(1).to(device)
                 out  = model(xb)
+                # sigmoid convertit le logit brut en probabilite [0,1] pour le seuillage
                 prob = torch.sigmoid(out)
                 loss_s2 += criterion(out, yb2).item() * xb.size(0)
                 pred     = (prob > 0.5).float()
@@ -329,6 +332,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
         # Early stopping
         if loss_te < best_loss - 1e-4:
             best_loss  = loss_te
+            # .clone() : copie independante des tenseurs, sinon ils pointent vers le meme objet
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             no_improve = 0
         else:
@@ -405,6 +409,7 @@ def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5, silent=False):
     FP = int(((y_pred_bin == 1) & (y_true_arr == 0)).sum())
     FN = int(((y_pred_bin == 0) & (y_true_arr == 1)).sum())
 
+    # max(..., 1) evite la division par zero si une classe est absente du test set
     sensibilite = TP / max(TP + FN, 1)
     specificite = TN / max(TN + FP, 1)
     precision   = TP / max(TP + FP, 1)

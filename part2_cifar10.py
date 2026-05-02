@@ -222,6 +222,7 @@ def demo_convolution_couleur(x_train_raw):
     img = x_train_raw[0].astype(np.float32) / 255.0
 
     sobel = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
+    # Meme filtre Sobel applique sur les 3 canaux : la feature map somme les bords RGB
     kernels_rgb = np.stack([sobel, sobel, sobel], axis=-1)
     feature_map = convolve2d_color(img, kernels_rgb)
 
@@ -250,6 +251,7 @@ def demo_max_pooling(x_train_raw):
 
     sobel = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
     feat = convolve2d(img_gray, sobel)
+    # clip a 0 : on ne garde que les bords positifs (transitions sombre→clair)
     pooled = max_pooling2x2(np.clip(feat, 0, None))
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
@@ -271,6 +273,7 @@ def demo_max_pooling(x_train_raw):
 
 def afficher_exemples_cifar(x_train_raw, y_train):
     """Affiche une grille d'exemples (8 images par classe) pour visualiser CIFAR-10."""
+    # Utile pour constater la variabilite intra-classe : meme label, aspects tres differents
     fig, axes = plt.subplots(10, 8, figsize=(14, 18))
     for classe in range(10):
         indices = np.where(y_train == classe)[0][:8]
@@ -394,6 +397,8 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
             self.relu  = nn.ReLU()
 
         def forward(self, x):
+            # Ordre : Conv → BN → ReLU : la normalisation avant l'activation
+            # stabilise les distributions et accelere la convergence
             x = self.relu(self.bn1(self.conv1(x)))
             x = self.relu(self.bn2(self.conv2(x)))
             x = self.pool1(x)
@@ -480,6 +485,7 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
     plt.show()
     print("  Figure sauvegardee : rapport/p2_cnn_courbes.png")
 
+    # Un gap train-test > 10% signale que le modele memorise le train set
     overfit = hist['acc_tr'][-1] - hist['acc_te'][-1]
     print(f"\n  Acc train finale : {hist['acc_tr'][-1]:.4f} ({hist['acc_tr'][-1]*100:.1f}%)")
     print(f"  Acc test finale  : {hist['acc_te'][-1]:.4f} ({hist['acc_te'][-1]*100:.1f}%)")

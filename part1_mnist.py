@@ -218,6 +218,7 @@ class ModeleUneCoucheCachee:
         self.b2 -= lr * self.db2
 
     def update_adam(self, state, lr, t, beta1=0.9, beta2=0.999, eps=1e-8):
+        # Meme logique que ModeleLineaire.update_adam, appliquee aux 4 tenseurs de poids
         for p_name, g_name in [('W1', 'dW1'), ('b1', 'db1'), ('W2', 'dW2'), ('b2', 'db2')]:
             g = getattr(self, g_name)
             if p_name not in state:
@@ -250,6 +251,8 @@ class ModeleDeuxCouchesCachees:
     """
 
     def __init__(self, input_dim=784, hidden1=128, hidden2=64, output_dim=10):
+        # He init sur les 3 couches : chaque ReLU annule ~50% des neurones,
+        # on double la variance pour compenser ce "gaspillage" de signal
         self.W1 = he_init(input_dim, hidden1)
         self.b1 = np.zeros((1, hidden1))
         self.W2 = he_init(hidden1, hidden2)
@@ -268,6 +271,8 @@ class ModeleDeuxCouchesCachees:
         return self.P
 
     def backward(self, Y):
+        # Meme principe que MLP-1 mais on propage le gradient a travers 3 couches
+        # au lieu de 2 : couche sortie → couche cachee 2 → couche cachee 1
         n = self.X.shape[0]
         dZ3 = (self.P - Y) / n
         self.dW3 = self.H2.T @ dZ3
@@ -292,6 +297,7 @@ class ModeleDeuxCouchesCachees:
         self.b3 -= lr * self.db3
 
     def update_adam(self, state, lr, t, beta1=0.9, beta2=0.999, eps=1e-8):
+        # Meme logique que ModeleLineaire.update_adam, appliquee aux 6 tenseurs de poids
         pairs = [('W1','dW1'),('b1','db1'),('W2','dW2'),('b2','db2'),('W3','dW3'),('b3','db3')]
         for p_name, g_name in pairs:
             g = getattr(self, g_name)
@@ -337,6 +343,8 @@ def entrainer(modele, x_train, y_train, x_test, y_test,
     n = x_train.shape[0]
     hist = {'loss': [], 'err_train': [], 'err_test': []}
 
+    # adam_state stocke les moments m et v pour chaque parametre du modele
+    # adam_t est le compteur de steps (necessaire pour la correction du biais)
     adam_state = {}
     adam_t = 0
     t0 = time.time()
@@ -384,6 +392,8 @@ def entrainer(modele, x_train, y_train, x_test, y_test,
 # ============================================================
 
 def afficher_courbes(hist, titre, fichier=None):
+    # On trace la loss et le taux d'erreur train/test en fonction des epochs
+    # Si la courbe test decroche vers le haut : signe d'overfitting
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
     ax1.plot(hist['loss'], color='steelblue')
     ax1.set_title('Fonction de cout (cross-entropy)')
@@ -406,6 +416,8 @@ def afficher_courbes(hist, titre, fichier=None):
 
 
 def afficher_matrice_confusion(y_true, y_pred, titre, fichier=None):
+    # Heatmap 10x10 : case (i,j) = nombre d'images du chiffre i classees comme j
+    # La diagonale = bonnes predictions. Hors diagonale = erreurs du modele
     mat = matrice_confusion(y_true, y_pred, n_classes=10)
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.imshow(mat, cmap='Blues')
@@ -427,6 +439,8 @@ def afficher_matrice_confusion(y_true, y_pred, titre, fichier=None):
 
 
 def afficher_erreurs(modele, x_test, y_test, titre, fichier=None):
+    # Affiche les 10 premieres images mal classees : utile pour comprendre
+    # quels cas posent probleme (chiffres ambigus, ecriture atypique, etc.)
     y_pred = modele.predict(x_test)
     erreurs = np.where(y_pred != y_test)[0]
     fig, axes = plt.subplots(2, 5, figsize=(12, 5))
@@ -450,6 +464,8 @@ def afficher_pca(modele, x_test, y_test, titre, fichier=None):
         print("  sklearn non disponible pour PCA.")
         return
 
+    # PCA = reduction lineaire : si les chiffres forment des clusters bien separes,
+    # le modele a appris des representations discriminantes dans sa couche cachee
     n_subset = 2000
     idx = np.random.choice(len(x_test), n_subset, replace=False)
     repres = modele.get_hidden(x_test[idx]) if hasattr(modele, 'get_hidden') else x_test[idx]
@@ -479,6 +495,8 @@ def afficher_tsne(modele, x_test, y_test, titre, fichier=None):
         print("  sklearn non disponible pour t-SNE.")
         return
 
+    # t-SNE = reduction non-lineaire, meilleure que PCA pour visualiser des clusters
+    # Plus lente (1-2 min) mais les groupes de chiffres apparaissent plus clairement
     n_subset = 1000
     idx = np.random.choice(len(x_test), n_subset, replace=False)
     repres = modele.get_hidden(x_test[idx]) if hasattr(modele, 'get_hidden') else x_test[idx]
