@@ -316,7 +316,7 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
         import torch.optim as optim
         from torch.utils.data import Dataset, DataLoader
     except ImportError:
-        print("  PyTorch non installe. Executer :")
+        print("  PyTorch non installe. Executer (mac):")
         print("  venv/bin/pip install torch torchvision")
         return None, None
 

@@ -485,6 +485,7 @@ def afficher_tsne(modele, x_test, y_test, titre, fichier=None):
 
     print("  Calcul t-SNE (peut prendre 1-2 min)...")
     tsne = TSNE(n_components=2, random_state=42, perplexity=30, max_iter=1000)
+    tsne = TSNE(n_components=2, random_state=42, perplexity=30)
     proj = tsne.fit_transform(repres)
 
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -592,6 +593,9 @@ def menu_partie1():
                 ('Lineaire', ModeleLineaire(), 0.1, 'sgd'),
                 ('MLP-1 (h=128)', ModeleUneCoucheCachee(hidden_dim=128), 0.1, 'sgd'),
                 ('MLP-2 (128/64)', ModeleDeuxCouchesCachees(hidden1=128, hidden2=64), 0.1, 'sgd'),
+                ('Lineaire', ModeleLineaire(), 0.1),
+                ('MLP-1 (h=128)', ModeleUneCoucheCachee(hidden_dim=128), 0.1),
+                ('MLP-2 (128/64)', ModeleDeuxCouchesCachees(hidden1=128, hidden2=64), 0.1),
             ]
             resultats = []
             for nom, modele, lr, opt in configs:
@@ -616,6 +620,7 @@ def menu_partie1():
         elif choix == '5':
             print("Entrainement MLP-2 pour matrice de confusion...")
             modele = ModeleDeuxCouchesCachees(hidden1=128, hidden2=64)
+            modele = ModeleDeuxCouchesCachees(784, 128, 64, 10)
             entrainer(modele, x_train, y_train, x_test, y_test,
                       lr=0.1, epochs=30, verbose=False)
             y_pred = modele.predict(x_test)
@@ -624,6 +629,7 @@ def menu_partie1():
         elif choix == '6':
             print("Entrainement MLP-2 pour images mal classees...")
             modele = ModeleDeuxCouchesCachees(hidden1=128, hidden2=64)
+            modele = ModeleDeuxCouchesCachees(784, 64)
             entrainer(modele, x_train, y_train, x_test, y_test,
                       lr=0.1, epochs=30, verbose=False)
             afficher_erreurs(modele, x_test, y_test,
