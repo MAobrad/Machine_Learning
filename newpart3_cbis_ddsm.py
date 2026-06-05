@@ -11,91 +11,33 @@ import os
 np.random.seed(42)
 os.makedirs('rapport', exist_ok=True)
 
-import os
-
-print(os.path.exists(
-    os.path.expanduser("~/.kaggle/kaggle.json")
-))
-
-import os
-import zipfile
-
-def telecharger_cbis_ddsm():
-    """
-    Télécharge automatiquement le dataset CBIS-DDSM depuis Kaggle
-    s'il n'est pas déjà présent.
-
-    Retour :
-        dossier racine du dataset
-    """
-
-    root = "cbis_ddsm"
-
-    # Déjà présent ?
-    if os.path.exists(root):
-        print("  Dataset CBIS-DDSM déjà présent.")
-        return root
-
-    print("  Téléchargement du dataset CBIS-DDSM...")
-
-    try:
-        from kaggle.api.kaggle_api_extended import KaggleApi
-    except ImportError:
-        raise ImportError(
-            "Installer l'API Kaggle : pip install kaggle"
-        )
-
-    api = KaggleApi()
-    api.authenticate()
-
-    zip_path = "cbis_ddsm.zip"
-
-    api.dataset_download_files(
-        "awsaf49/cbis-ddsm-breast-cancer-image-dataset",
-        path=".",
-        unzip=False
-    )
-
-    # Le nom du zip téléchargé varie parfois,
-    # on cherche automatiquement
-    fichiers_zip = [
-        f for f in os.listdir(".")
-        if f.endswith(".zip")
-    ]
-
-    if not fichiers_zip:
-        raise FileNotFoundError(
-            "Aucun fichier ZIP téléchargé."
-        )
-
-    zip_path = fichiers_zip[0]
-
-    print("  Décompression...")
-
-    with zipfile.ZipFile(zip_path, "r") as z:
-        z.extractall(root)
-
-    print("  Dataset prêt.")
-
-    print("\nContenu du dataset :")
-
-    for root, dirs, files in os.walk(root):
-        print(root)
-
-        for f in files[:5]:
-            print("   ", f)
-
-        print()
-
-        if len(files) > 20:
-            break
-
-    return root
-
 
 # ============================================================
 # 1. CHARGEMENT ET PRETRAITEMENT
 # ============================================================
+
+def telecharger_cbis_si_necessaire():
+    import os
+
+    root = "data/cbis_ddsm"
+
+    if os.path.exists(root):
+        return root
+
+    print("Téléchargement CBIS-DDSM...")
+
+    from kaggle.api.kaggle_api_extended import KaggleApi
+
+    api = KaggleApi()
+    api.authenticate()
+
+    api.dataset_download_files(
+        "awsaf49/cbis-ddsm-breast-cancer-image-dataset",
+        path="data",
+        unzip=True
+    )
+
+    return root
 
 def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128)):
     """
@@ -127,7 +69,8 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
     print(f"  Benins : {benins}  Malins : {malins}  "
           f"({malins/(benins+malins)*100:.1f}% malins)")
 
-    col_img = 'cropped image file path'
+    col_img = next((c for c in df_train.columns
+                    if 'image' in c.lower() and 'path' in c.lower()), None)
     if col_img is None:
         raise ValueError("Colonne de chemin image non trouvee dans le CSV.")
 
@@ -581,52 +524,16 @@ def menu_partie3():
     print("  Prerequis : CSV CBIS-DDSM + images correspondantes")
     print("  Sans donnees : pipeline de demonstration synthetique\n")
 
-    try:
-        dataset_root = telecharger_cbis_ddsm()
-    except Exception as e:
-        print(f"\n  Impossible de récupérer le dataset : {e}")
-        dataset_root = None
-    print("\nStructure du dataset :")
-
-    for root, dirs, files in os.walk(dataset_root):
-        print(root)
-        if len(files) > 0:
-            print("  ", files[:3])
-
-    csv_train = None
-    csv_test = None
-    img_dir = None
-
-    if dataset_root is not None:
-
-        for root, dirs, files in os.walk(dataset_root):
-            for f in files:
-                if f == "mass_case_description_train_set.csv":
-                    csv_train = os.path.join(root, f)
-
-                elif f == "mass_case_description_test_set.csv":
-                    csv_test = os.path.join(root, f)
-
-    csv_train = os.path.join(
-        dataset_root,
-        "csv",
-        "mass_case_description_train_set.csv"
-    )
-
-    csv_test = os.path.join(
-        dataset_root,
-        "csv",
-        "mass_case_description_test_set.csv"
-    )
-
-    img_dir = os.path.join(dataset_root, "jpeg")
+    csv_train = input("  CSV train [mass_case_description_train_set.csv] : ").strip()
+    if not csv_train:
+        csv_train = 'mass_case_description_train_set.csv'
+    csv_test = input("  CSV test  [mass_case_description_test_set.csv]  : ").strip()
+    if not csv_test:
+        csv_test = 'mass_case_description_test_set.csv'
+    img_dir = input("  Dossier images [.] : ").strip() or '.'
 
     mode = "synthetique"
-    if (
-            csv_train is not None
-            and csv_test is not None
-            and img_dir is not None
-    ):
+    if os.path.exists(csv_train):
         result = charger_cbis_ddsm(csv_train, csv_test, img_dir)
         if result[0] is not None:
             X_train, y_train, X_test, y_test, ratio = result
