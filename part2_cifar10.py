@@ -498,7 +498,96 @@ def entrainer_cnn_cifar10(x_train_raw, y_train, x_test_raw, y_test):
 
 
 # ============================================================
-# 6. MENU PARTIE 2
+# 6. COURBE D'APPRENTISSAGE CIFAR-10
+# ============================================================
+
+def courbe_apprentissage_cifar(x_train, y_train, x_test, y_test):
+    """Accuracy vs % de donnees d'entrainement (MLP-2 couleur, Adam, 15 epochs)."""
+    tailles = [640, 3200, 6400, 12800, 25600, 50000]  # 1.3 / 6.4 / 12.8 / 25.6 / 51.2 / 100 %
+    pcts    = [t / 500 for t in tailles]
+
+    c_tr, c_te = preparer_couleur(x_train, x_test)
+    acc_tr_list, acc_te_list = [], []
+
+    print("\n  Courbe d'apprentissage — MLP-2 couleur (256/128, Adam, 15 epochs)")
+    print(f"  {'N train':>8}  {'% train':>7}  {'Acc train':>10}  {'Acc test':>9}")
+    print("  " + "-" * 44)
+
+    for n in tailles:
+        idx = np.random.choice(len(c_tr), n, replace=False)
+        xtr, ytr = c_tr[idx], y_train[idx]
+        modele = ModeleDeuxCouchesCachees(3072, 256, 128)
+        hist = entrainer(modele, xtr, ytr, c_te, y_test,
+                         lr=0.001, epochs=15, batch_size=256, verbose=False)
+        acc_tr = 1 - hist['err_train'][-1]
+        acc_te = 1 - hist['err_test'][-1]
+        acc_tr_list.append(acc_tr)
+        acc_te_list.append(acc_te)
+        print(f"  {n:>8}  {n/500:>6.1f}%  {acc_tr:>10.4f}  {acc_te:>9.4f}")
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(pcts, acc_tr_list, 'o-', label='Train', color='steelblue')
+    ax.plot(pcts, acc_te_list, 's-', label='Test',  color='tomato')
+    ax.axvline(x=12.8, color='gray', linestyle='--', alpha=0.7, label='12.8% (6 400 ex.)')
+    ax.set_xlabel("% de donnees d'entrainement utilisees")
+    ax.set_ylabel('Accuracy')
+    ax.set_title("Courbe d'apprentissage — MLP-2 CIFAR-10")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig('rapport/p2_courbe_apprentissage.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("  Figure sauvegardee : rapport/p2_courbe_apprentissage.png")
+
+
+def precision_rappel_cifar(x_train, y_train, x_test, y_test):
+    """Classification report sklearn + histogramme par classe (MLP-2 couleur, Adam)."""
+    try:
+        from sklearn.metrics import classification_report, precision_score, recall_score, f1_score
+    except ImportError:
+        print("  sklearn requis : pip install scikit-learn")
+        return
+
+    noms_classes = ['avion', 'auto', 'oiseau', 'chat', 'cerf',
+                    'chien', 'grenouille', 'cheval', 'bateau', 'camion']
+
+    print("  Entrainement MLP-2 couleur (256/128, Adam, 20 epochs)...")
+    c_tr, c_te = preparer_couleur(x_train, x_test)
+    modele = ModeleDeuxCouchesCachees(3072, 256, 128)
+    entrainer(modele, c_tr, y_train, c_te, y_test,
+              lr=0.001, epochs=20, batch_size=256, verbose=False)
+    y_pred = modele.predict(c_te)
+
+    print("\n" + "=" * 62)
+    print("  RAPPORT CLASSIFICATION — MLP-2 CIFAR-10 (test set)")
+    print("=" * 62)
+    print(classification_report(y_test, y_pred, target_names=noms_classes))
+
+    prec = precision_score(y_test, y_pred, average=None)
+    rec  = recall_score(y_test, y_pred, average=None)
+    f1   = f1_score(y_test, y_pred, average=None)
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    x = np.arange(10)
+    w = 0.28
+    ax.bar(x - w, prec, w, label='Precision', color='steelblue')
+    ax.bar(x,     rec,  w, label='Rappel',    color='tomato')
+    ax.bar(x + w, f1,   w, label='F1-score',  color='seagreen')
+    ax.set_xticks(x)
+    ax.set_xticklabels(noms_classes, rotation=30, ha='right')
+    ax.set_ylabel('Score')
+    ax.set_title('Precision / Rappel / F1 par classe — MLP-2 CIFAR-10')
+    ax.set_ylim(0, 1.05)
+    ax.legend()
+    ax.grid(True, axis='y', alpha=0.3)
+    plt.tight_layout()
+    plt.savefig('rapport/p2_precision_rappel.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("  Figure sauvegardee : rapport/p2_precision_rappel.png")
+
+
+# ============================================================
+# 7. MENU PARTIE 2
 # ============================================================
 
 def menu_partie2():
@@ -515,6 +604,8 @@ def menu_partie2():
         print("  4  - Demo Max-Pooling 2x2")
         print("  5  - CNN PyTorch complet (augmente, 25 epochs)")
         print("  6  - Apercu images CIFAR-10 par classe")
+        print("  7  - Courbe d'apprentissage (impact taille du train set)")
+        print("  8  - Precision / Rappel par classe (MLP-2 couleur)")
         print("  0  - Retour au menu principal")
         print("-" * 55)
 
@@ -532,6 +623,10 @@ def menu_partie2():
             entrainer_cnn_cifar10(x_train, y_train, x_test, y_test)
         elif choix == '6':
             afficher_exemples_cifar(x_train, y_train)
+        elif choix == '7':
+            courbe_apprentissage_cifar(x_train, y_train, x_test, y_test)
+        elif choix == '8':
+            precision_rappel_cifar(x_train, y_train, x_test, y_test)
         elif choix == '0':
             break
         else:

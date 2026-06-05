@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 .idea/
 *.png
+.DS_Store
+
+# Dataset Kaggle CBIS-DDSM
+jpeg/
+csv/
+rapport.zip

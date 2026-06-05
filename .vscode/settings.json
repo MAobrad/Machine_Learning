@@ -1,0 +1,10 @@
+{
+    "files.exclude": {
+        "jpeg/": true,
+        "csv/": true
+    },
+    "files.watcherExclude": {
+        "**/jpeg/**": true,
+        "**/csv/**": true
+    }
+}

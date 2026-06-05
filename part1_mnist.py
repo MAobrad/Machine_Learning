@@ -519,7 +519,97 @@ def afficher_tsne(modele, x_test, y_test, titre, fichier=None):
 
 
 # ============================================================
-# 6. GRID SEARCH
+# 6. COURBE D'APPRENTISSAGE (impact taille du train set)
+# ============================================================
+
+def courbe_apprentissage(x_train, y_train, x_test, y_test):
+    """Accuracy vs % de donnees d'entrainement utilisees (MLP-2, Adam, 20 epochs)."""
+    from sklearn.metrics import classification_report
+    tailles = [768, 3840, 7680, 15360, 30720, 60000]  # 1.3 / 6.4 / 12.8 / 25.6 / 51.2 / 100 %
+    pcts    = [t / 600 for t in tailles]               # pourcentages
+    acc_tr_list, acc_te_list = [], []
+
+    print("\n  Courbe d'apprentissage — MLP-2 (128/64, Adam, 20 epochs)")
+    print(f"  {'N train':>8}  {'% train':>7}  {'Acc train':>10}  {'Acc test':>9}")
+    print("  " + "-" * 44)
+
+    for n in tailles:
+        idx = np.random.choice(len(x_train), n, replace=False)
+        xtr, ytr = x_train[idx], y_train[idx]
+        modele = ModeleDeuxCouchesCachees(hidden1=128, hidden2=64)
+        hist = entrainer(modele, xtr, ytr, x_test, y_test,
+                         lr=0.001, epochs=20, verbose=False, optimizer='adam')
+        acc_tr = 1 - hist['err_train'][-1]
+        acc_te = 1 - hist['err_test'][-1]
+        acc_tr_list.append(acc_tr)
+        acc_te_list.append(acc_te)
+        print(f"  {n:>8}  {n/600:>6.1f}%  {acc_tr:>10.4f}  {acc_te:>9.4f}")
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(pcts, acc_tr_list, 'o-', label='Train', color='steelblue')
+    ax.plot(pcts, acc_te_list, 's-', label='Test',  color='tomato')
+    ax.axvline(x=12.8, color='gray', linestyle='--', alpha=0.7, label='12.8% (7 680 ex.)')
+    ax.set_xlabel('% de donnees d\'entrainement utilisees')
+    ax.set_ylabel('Accuracy')
+    ax.set_title('Courbe d\'apprentissage — MLP-2 MNIST')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig('rapport/p1_courbe_apprentissage.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("  Figure sauvegardee : rapport/p1_courbe_apprentissage.png")
+
+
+# ============================================================
+# 7. PRECISION / RAPPEL PAR CLASSE
+# ============================================================
+
+def precision_rappel_classes(x_train, y_train, x_test, y_test):
+    """Classification report sklearn + heatmap precision/rappel par chiffre (MLP-2)."""
+    try:
+        from sklearn.metrics import classification_report, precision_score, recall_score, f1_score
+    except ImportError:
+        print("  sklearn requis : pip install scikit-learn")
+        return
+
+    print("  Entrainement MLP-2 (128/64, Adam, 30 epochs)...")
+    modele = ModeleDeuxCouchesCachees(hidden1=128, hidden2=64)
+    entrainer(modele, x_train, y_train, x_test, y_test,
+              lr=0.001, epochs=30, verbose=False, optimizer='adam')
+    y_pred = modele.predict(x_test)
+
+    print("\n" + "=" * 58)
+    print("  RAPPORT CLASSIFICATION — MLP-2 MNIST (test set)")
+    print("=" * 58)
+    print(classification_report(y_test, y_pred,
+                                target_names=[str(i) for i in range(10)]))
+
+    prec = precision_score(y_test, y_pred, average=None)
+    rec  = recall_score(y_test, y_pred, average=None)
+    f1   = f1_score(y_test, y_pred, average=None)
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    x = np.arange(10)
+    w = 0.28
+    ax.bar(x - w, prec, w, label='Precision', color='steelblue')
+    ax.bar(x,     rec,  w, label='Rappel',    color='tomato')
+    ax.bar(x + w, f1,   w, label='F1-score',  color='seagreen')
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(i) for i in range(10)])
+    ax.set_xlabel('Classe (chiffre)')
+    ax.set_ylabel('Score')
+    ax.set_title('Precision / Rappel / F1 par classe — MLP-2 MNIST')
+    ax.set_ylim(0, 1.05)
+    ax.legend()
+    ax.grid(True, axis='y', alpha=0.3)
+    plt.tight_layout()
+    plt.savefig('rapport/p1_precision_rappel.png', dpi=150, bbox_inches='tight')
+    plt.show()
+    print("  Figure sauvegardee : rapport/p1_precision_rappel.png")
+
+
+# ============================================================
+# 8. GRID SEARCH
 # ============================================================
 
 def grid_search(x_train, y_train, x_test, y_test):
@@ -587,6 +677,8 @@ def menu_partie1():
         print("  8  - Visualisation t-SNE")
         print("  9  - Grid search complet (SGD + Adam)")
         print("  b  - Comparaison SGD vs Adam (MLP-2)")
+        print("  c  - Courbe d'apprentissage (impact taille du train set)")
+        print("  d  - Precision / Rappel par classe (MLP-2)")
         print("  0  - Retour au menu principal")
         print("-" * 52)
 
@@ -701,6 +793,12 @@ def menu_partie1():
             print("  Figure sauvegardee : rapport/p1_sgd_vs_adam.png")
             print(f"\n  SGD  — Accuracy test : {(1-h_sgd['err_test'][-1])*100:.2f}%")
             print(f"  Adam — Accuracy test : {(1-h_adam['err_test'][-1])*100:.2f}%")
+
+        elif choix == 'c':
+            courbe_apprentissage(x_train, y_train, x_test, y_test)
+
+        elif choix == 'd':
+            precision_rappel_classes(x_train, y_train, x_test, y_test)
 
         elif choix == '0':
             break

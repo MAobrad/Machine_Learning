@@ -51,6 +51,22 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
     if col_img is None:
         raise ValueError("Colonne de chemin image non trouvee dans le CSV.")
 
+    # Mapping patient_folder → JPEG path (Kaggle dataset)
+    jpeg_map = {}
+    dicom_info_path = os.path.join(img_dir, 'csv', 'dicom_info.csv')
+    if not os.path.exists(dicom_info_path):
+        dicom_info_path = 'csv/dicom_info.csv'
+    if os.path.exists(dicom_info_path):
+        try:
+            dicom_info = pd.read_csv(dicom_info_path)
+            full_mammo = dicom_info[dicom_info['SeriesDescription'] == 'full mammogram images']
+            for _, r in full_mammo.iterrows():
+                raw = str(r['image_path']).replace('CBIS-DDSM/', '')
+                jpeg_map[str(r['PatientID'])] = os.path.join(img_dir, raw)
+            print(f"  Mapping JPEG charge : {len(jpeg_map)} entrees")
+        except Exception as e:
+            print(f"  Avertissement : impossible de charger dicom_info.csv ({e})")
+
     def ouvrir_image(path, target_size):
         from PIL import Image
         if path.lower().endswith('.dcm'):
@@ -71,6 +87,9 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
         ok, manquants = 0, 0
         for _, row in df.iterrows():
             path = os.path.join(img_dir, str(row[col_img]).strip())
+            if not os.path.exists(path) and jpeg_map:
+                patient_folder = str(row[col_img]).split('/')[0]
+                path = jpeg_map.get(patient_folder, path)
             if not os.path.exists(path):
                 manquants += 1
                 continue
