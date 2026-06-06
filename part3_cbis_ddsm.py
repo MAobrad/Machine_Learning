@@ -3,15 +3,17 @@ part3_cbis_ddsm.py - Partie 3 : Detection de cancer du sein (CBIS-DDSM)
 Classification binaire : BENIGN (0) vs MALIGNANT (1)
 On utilise PyTorch et des metriques adaptees au contexte medical.
 """
+from torchvision import transforms
 
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+from torch.utils.data import Dataset
+import torch
 
 np.random.seed(42)
 os.makedirs('rapport', exist_ok=True)
 
-import os
 
 print(os.path.exists(
     os.path.expanduser("~/.kaggle/kaggle.json")
@@ -119,6 +121,20 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
         return df
 
     df_train = lire_df(csv_train)
+    print(df_train.iloc[0][[
+        'image file path',
+        'cropped image file path',
+        'ROI mask file path'
+    ]])
+    print("\nIMAGE FILE PATH:")
+    print(df_train.iloc[0]['image file path'])
+
+    print("\nCROPPED IMAGE FILE PATH:")
+    print(df_train.iloc[0]['cropped image file path'])
+
+    print("\nROI MASK FILE PATH:")
+    print(df_train.iloc[0]['ROI mask file path'])
+
     df_test = lire_df(csv_test) if csv_test and os.path.exists(csv_test) else None
 
     print(f"  Train CSV : {len(df_train)} cas")
@@ -127,7 +143,7 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
     print(f"  Benins : {benins}  Malins : {malins}  "
           f"({malins/(benins+malins)*100:.1f}% malins)")
 
-    col_img = 'cropped image file path'
+    col_img = 'image file path'
     if col_img is None:
         raise ValueError("Colonne de chemin image non trouvee dans le CSV.")
 
@@ -149,22 +165,60 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
     def charger_images(df):
         X, y = [], []
         ok, manquants = 0, 0
+
         for _, row in df.iterrows():
-            path = os.path.join(img_dir, str(row[col_img]).strip())
-            if not os.path.exists(path):
+
+            csv_path = str(row[col_img]).strip()
+
+            parts = csv_path.replace("\\", "/").split("/")
+
+            uid = parts[-2]
+
+            jpeg_dir = os.path.join(img_dir, uid)
+
+            if not os.path.isdir(jpeg_dir):
                 manquants += 1
                 continue
+
+            jpg_files = sorted(
+                f for f in os.listdir(jpeg_dir)
+                if f.lower().endswith(".jpg")
+            )
+
+            if len(jpg_files) == 0:
+                manquants += 1
+                continue
+
+            path = os.path.join(jpeg_dir, jpg_files[0])
             try:
+
+                if ok < 5:
+                    print("JPEG found:", path)
+
                 arr = ouvrir_image(path, target_size)
+
                 X.append(arr)
                 y.append(row['label'])
+
                 ok += 1
-            except Exception:
+
+            except Exception as e:
+
+                print(f"Error loading image: {path}")
+                print(f"Reason: {e}")
+
                 manquants += 1
+                continue
+
         print(f"  Images chargees : {ok}  (manquantes/erreurs : {manquants})")
+
         if ok == 0:
             return None, None
-        return np.array(X)[:, :, :, np.newaxis], np.array(y, dtype=np.int64)
+
+        return (
+            np.array(X)[:, :, :, np.newaxis],
+            np.array(y, dtype=np.int64)
+        )
 
     print("  Chargement images train...")
     X_train, y_train = charger_images(df_train)
@@ -195,7 +249,76 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
     ratio_poids = (y_train == 0).sum() / max((y_train == 1).sum(), 1)
     print(f"  Ratio benin/malin (pos_weight) : {ratio_poids:.2f}")
 
+    print("Train")
+    print("Benins :", (y_train == 0).sum())
+    print("Malins :", (y_train == 1).sum())
+
+    print("Test")
+    print("Benins :", (y_test == 0).sum())
+    print("Malins :", (y_test == 1).sum())
+
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(2, 5, figsize=(12, 6))
+
+    for i in range(10):
+        ax = axes.flat[i]
+
+        ax.imshow(
+            X_train[i].squeeze(),
+            cmap="gray"
+        )
+
+        ax.set_title(
+            f"Label={y_train[i]}"
+        )
+
+        ax.axis("off")
+
+    plt.tight_layout()
+    plt.show()
+
     return X_train, y_train, X_test, y_test, ratio_poids
+
+class MammographyDataset(Dataset):
+
+    def __init__(self, X, y, transform=None):
+        self.X = X
+        self.y = y
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+
+        image = self.X[idx]          # (128,128,1)
+        label = self.y[idx]
+
+        image = torch.tensor(
+            image.transpose(2, 0, 1),   # -> (1,128,128)
+            dtype=torch.float32
+        )
+
+        if self.transform:
+            image = self.transform(image)
+
+        return image, torch.tensor(label, dtype=torch.float32)
+
+    train_transform = transforms.Compose([
+
+        transforms.RandomHorizontalFlip(p=0.5),
+
+        transforms.RandomRotation(
+            degrees=5
+        ),
+
+        transforms.RandomAffine(
+            degrees=0,
+            translate=(0.05, 0.05)
+        ),
+
+    ])
 
 
 def afficher_stats_dataset(csv_train, csv_test=''):
@@ -294,14 +417,50 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n  Device : {device}")
 
-    # PyTorch attend (N, C, H, W) : on transpose depuis notre format (N, H, W, C)
-    x_tr = torch.tensor(X_train.transpose(0, 3, 1, 2), dtype=torch.float32)
-    x_te = torch.tensor(X_test.transpose(0, 3, 1, 2),  dtype=torch.float32)
-    y_tr = torch.tensor(y_train, dtype=torch.float32)
-    y_te = torch.tensor(y_test,  dtype=torch.float32)
+    # Dataset statistics
+    mean = X_train.mean()
+    std = X_train.std()
 
-    train_loader = DataLoader(TensorDataset(x_tr, y_tr), batch_size=32, shuffle=True,  num_workers=0)
-    test_loader  = DataLoader(TensorDataset(x_te, y_te), batch_size=64, shuffle=False, num_workers=0)
+    print(f"Dataset mean = {mean:.4f}")
+    print(f"Dataset std  = {std:.4f}")
+    print(f"Min value    = {X_train.min():.4f}")
+    print(f"Max value    = {X_train.max():.4f}")
+
+    from torchvision import transforms
+
+    train_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomRotation(5),
+        transforms.RandomAffine(
+            degrees=0,
+            translate=(0.05, 0.05)
+        )
+    ])
+
+    train_dataset = MammographyDataset(
+        X_train,
+        y_train,
+        transform=train_transform
+    )
+
+    test_dataset = MammographyDataset(
+        X_test,
+        y_test,
+        transform=None
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=32,
+        shuffle=True
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=64,
+        shuffle=False
+    )
+
 
     class CNN_Mammography(nn.Module):
         def __init__(self):
@@ -320,11 +479,14 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
             self.conv4 = nn.Conv2d(128, 128, 3, padding=1)
             self.bn4   = nn.BatchNorm2d(128)
             self.pool3 = nn.MaxPool2d(2, 2)
-            # Tete de classification binaire
-            self.fc1  = nn.Linear(128 * 16 * 16, 256)
-            self.fc2  = nn.Linear(256, 1)
+            # Global Average Pooling
+            self.gap = nn.AdaptiveAvgPool2d(1)
+            # Small classifier head
+            self.fc1 = nn.Linear(128, 64)
+            self.fc2 = nn.Linear(64, 1)
             self.relu = nn.ReLU()
             self.drop = nn.Dropout(0.5)
+
 
         def forward(self, x):
             x = self.relu(self.bn1(self.conv1(x)))
@@ -334,6 +496,9 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
             x = self.pool2(x)
             x = self.relu(self.bn4(self.conv4(x)))
             x = self.pool3(x)
+            # Global Average Pooling
+            x = self.gap(x)
+            # (batch, 128, 1, 1) -> (batch, 128)
             x = torch.flatten(x, 1)
             x = self.drop(self.relu(self.fc1(x)))
             return self.fc2(x)
@@ -620,6 +785,15 @@ def menu_partie3():
     )
 
     img_dir = os.path.join(dataset_root, "jpeg")
+    img_dir = os.path.join(dataset_root, "jpeg")
+
+    uid_test = "342386194811267636608694132590482924515"
+
+    print(
+        os.path.exists(
+            os.path.join(img_dir, uid_test)
+        )
+    )
 
     mode = "synthetique"
     if (
