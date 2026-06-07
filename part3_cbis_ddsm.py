@@ -126,14 +126,6 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
         'cropped image file path',
         'ROI mask file path'
     ]])
-    print("\nIMAGE FILE PATH:")
-    print(df_train.iloc[0]['image file path'])
-
-    print("\nCROPPED IMAGE FILE PATH:")
-    print(df_train.iloc[0]['cropped image file path'])
-
-    print("\nROI MASK FILE PATH:")
-    print(df_train.iloc[0]['ROI mask file path'])
 
     df_test = lire_df(csv_test) if csv_test and os.path.exists(csv_test) else None
 
@@ -192,9 +184,6 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
             path = os.path.join(jpeg_dir, jpg_files[0])
             try:
 
-                if ok < 5:
-                    print("JPEG found:", path)
-
                 arr = ouvrir_image(path, target_size)
 
                 X.append(arr)
@@ -248,35 +237,13 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
 
     ratio_poids = (y_train == 0).sum() / max((y_train == 1).sum(), 1)
     print(f"  Ratio benin/malin (pos_weight) : {ratio_poids:.2f}")
+    print(
+        f"Train : {(y_train == 0).sum()} benins / {(y_train == 1).sum()} malins"
+    )
 
-    print("Train")
-    print("Benins :", (y_train == 0).sum())
-    print("Malins :", (y_train == 1).sum())
-
-    print("Test")
-    print("Benins :", (y_test == 0).sum())
-    print("Malins :", (y_test == 1).sum())
-
-    import matplotlib.pyplot as plt
-
-    fig, axes = plt.subplots(2, 5, figsize=(12, 6))
-
-    for i in range(10):
-        ax = axes.flat[i]
-
-        ax.imshow(
-            X_train[i].squeeze(),
-            cmap="gray"
-        )
-
-        ax.set_title(
-            f"Label={y_train[i]}"
-        )
-
-        ax.axis("off")
-
-    plt.tight_layout()
-    plt.show()
+    print(
+        f"Test  : {(y_test == 0).sum()} benins / {(y_test == 1).sum()} malins"
+    )
 
     return X_train, y_train, X_test, y_test, ratio_poids
 
@@ -416,6 +383,13 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
     torch.manual_seed(42)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n  Device : {device}")
+    print("CUDA disponible :", torch.cuda.is_available())
+
+    if torch.cuda.is_available():
+        print("GPU :", torch.cuda.get_device_name(0))
+        print("CUDA version :", torch.version.cuda)
+    else:
+        print("Aucun GPU CUDA détecté")
 
     # Dataset statistics
     mean = X_train.mean()
@@ -474,33 +448,43 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
             # Bloc 2 : 64x64 → 32x32
             self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
             self.bn3   = nn.BatchNorm2d(128)
+            self.conv4 = nn.Conv2d(128, 128, 3, padding=1)
+            self.bn4 = nn.BatchNorm2d(128)
             self.pool2 = nn.MaxPool2d(2, 2)
             # Bloc 3 : 32x32 → 16x16
-            self.conv4 = nn.Conv2d(128, 128, 3, padding=1)
-            self.bn4   = nn.BatchNorm2d(128)
+            self.conv5 = nn.Conv2d(128, 256, 3, padding=1)
+            self.bn5 = nn.BatchNorm2d(256)
+            self.conv6 = nn.Conv2d(256, 256, 3, padding=1)
+            self.bn6 = nn.BatchNorm2d(256)
             self.pool3 = nn.MaxPool2d(2, 2)
             # Global Average Pooling
             self.gap = nn.AdaptiveAvgPool2d(1)
-            # Small classifier head
-            self.fc1 = nn.Linear(128, 64)
-            self.fc2 = nn.Linear(64, 1)
-            self.relu = nn.ReLU()
-            self.drop = nn.Dropout(0.5)
+            # Classification
+            self.fc1 = nn.Linear(256, 512)
+            self.fc2 = nn.Linear(512, 1)
 
+            self.relu = nn.ReLU()
+            self.drop = nn.Dropout(0.4)
 
         def forward(self, x):
             x = self.relu(self.bn1(self.conv1(x)))
             x = self.relu(self.bn2(self.conv2(x)))
             x = self.pool1(x)
+
             x = self.relu(self.bn3(self.conv3(x)))
-            x = self.pool2(x)
             x = self.relu(self.bn4(self.conv4(x)))
+            x = self.pool2(x)
+
+            x = self.relu(self.bn5(self.conv5(x)))
+            x = self.relu(self.bn6(self.conv6(x)))
             x = self.pool3(x)
-            # Global Average Pooling
+
             x = self.gap(x)
-            # (batch, 128, 1, 1) -> (batch, 128)
+
             x = torch.flatten(x, 1)
+
             x = self.drop(self.relu(self.fc1(x)))
+
             return self.fc2(x)
 
     model = CNN_Mammography().to(device)
@@ -631,7 +615,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
 # 3. EVALUATION MEDICALE
 # ============================================================
 
-def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5, silent=False):
+def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.30, silent=False):
     """
     Metriques medicales completes pour la detection de cancer.
 
@@ -646,7 +630,15 @@ def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5, silent=False):
     En pratique clinique, on accepte une sensibilite >= 90% meme si la specificite baisse.
     Le seuil optimal est determine via la courbe ROC (critere de Youden).
     """
-    y_pred_bin = (np.asarray(y_pred) >= seuil).astype(int)
+    if y_probs is not None:
+        y_pred_bin = (np.asarray(y_probs) >= seuil).astype(int)
+    else:
+        y_pred_bin = np.asarray(y_pred).astype(int)
+        print("y_pred min/max :", np.min(y_pred), np.max(y_pred))
+
+        if y_probs is not None:
+            print("y_probs min/max :", np.min(y_probs), np.max(y_probs))
+
     y_true_arr = np.asarray(y_true).astype(int)
 
     TP = int(((y_pred_bin == 1) & (y_true_arr == 1)).sum())
@@ -751,16 +743,20 @@ def menu_partie3():
     except Exception as e:
         print(f"\n  Impossible de récupérer le dataset : {e}")
         dataset_root = None
-    print("\nStructure du dataset :")
 
-    for root, dirs, files in os.walk(dataset_root):
-        print(root)
-        if len(files) > 0:
-            print("  ", files[:3])
+    csv_train = os.path.join(
+        dataset_root,
+        "csv",
+        "mass_case_description_train_set.csv"
+    )
 
-    csv_train = None
-    csv_test = None
-    img_dir = None
+    csv_test = os.path.join(
+        dataset_root,
+        "csv",
+        "mass_case_description_test_set.csv"
+    )
+
+    img_dir = os.path.join(dataset_root, "jpeg")
 
     if dataset_root is not None:
 
