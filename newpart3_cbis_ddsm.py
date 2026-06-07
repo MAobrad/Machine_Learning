@@ -3,94 +3,41 @@ part3_cbis_ddsm.py - Partie 3 : Detection de cancer du sein (CBIS-DDSM)
 Classification binaire : BENIGN (0) vs MALIGNANT (1)
 On utilise PyTorch et des metriques adaptees au contexte medical.
 """
+
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-from torch.utils.data import Dataset
-import torch
 
 np.random.seed(42)
 os.makedirs('rapport', exist_ok=True)
 
 
-import zipfile
+# ============================================================
+# 1. CHARGEMENT ET PRETRAITEMENT
+# ============================================================
 
-def telecharger_cbis_ddsm():
-    """
-    Télécharge automatiquement le dataset CBIS-DDSM depuis Kaggle
-    s'il n'est pas déjà présent.
+def telecharger_cbis_si_necessaire():
+    import os
 
-    Retour :
-        dossier racine du dataset
-    """
+    root = "data/cbis_ddsm"
 
-    root = "cbis_ddsm"
-
-    # Déjà présent ?
     if os.path.exists(root):
-        print("  Dataset CBIS-DDSM déjà présent.")
         return root
 
-    print("  Téléchargement du dataset CBIS-DDSM...")
+    print("Téléchargement CBIS-DDSM...")
 
-    try:
-        from kaggle.api.kaggle_api_extended import KaggleApi
-    except ImportError:
-        raise ImportError(
-            "Installer l'API Kaggle : pip install kaggle"
-        )
+    from kaggle.api.kaggle_api_extended import KaggleApi
 
     api = KaggleApi()
     api.authenticate()
 
-    zip_path = "cbis_ddsm.zip"
-
     api.dataset_download_files(
         "awsaf49/cbis-ddsm-breast-cancer-image-dataset",
-        path=".",
-        unzip=False
+        path="data",
+        unzip=True
     )
 
-    # Le nom du zip téléchargé varie parfois,
-    # on cherche automatiquement
-    fichiers_zip = [
-        f for f in os.listdir(".")
-        if f.endswith(".zip")
-    ]
-
-    if not fichiers_zip:
-        raise FileNotFoundError(
-            "Aucun fichier ZIP téléchargé."
-        )
-
-    zip_path = fichiers_zip[0]
-
-    print("  Décompression...")
-
-    with zipfile.ZipFile(zip_path, "r") as z:
-        z.extractall(root)
-
-    print("  Dataset prêt.")
-
-    print("\nContenu du dataset :")
-
-    for root, dirs, files in os.walk(root):
-        print(root)
-
-        for f in files[:5]:
-            print("   ", f)
-
-        print()
-
-        if len(files) > 20:
-            break
-
     return root
-
-
-# ============================================================
-# 1. CHARGEMENT ET PRETRAITEMENT
-# ============================================================
 
 def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128)):
     """
@@ -122,25 +69,10 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
     print(f"  Benins : {benins}  Malins : {malins}  "
           f"({malins/(benins+malins)*100:.1f}% malins)")
 
-    col_img = 'image file path'
+    col_img = next((c for c in df_train.columns
+                    if 'image' in c.lower() and 'path' in c.lower()), None)
     if col_img is None:
         raise ValueError("Colonne de chemin image non trouvee dans le CSV.")
-
-    # Mapping patient_folder → JPEG path (Kaggle dataset)
-    jpeg_map = {}
-    dicom_info_path = os.path.join(img_dir, 'csv', 'dicom_info.csv')
-    if not os.path.exists(dicom_info_path):
-        dicom_info_path = 'csv/dicom_info.csv'
-    if os.path.exists(dicom_info_path):
-        try:
-            dicom_info = pd.read_csv(dicom_info_path)
-            full_mammo = dicom_info[dicom_info['SeriesDescription'] == 'full mammogram images']
-            for _, r in full_mammo.iterrows():
-                raw = str(r['image_path']).replace('CBIS-DDSM/', '')
-                jpeg_map[str(r['PatientID'])] = os.path.join(img_dir, raw)
-            print(f"  Mapping JPEG charge : {len(jpeg_map)} entrees")
-        except Exception as e:
-            print(f"  Avertissement : impossible de charger dicom_info.csv ({e})")
 
     def ouvrir_image(path, target_size):
         from PIL import Image
@@ -160,48 +92,22 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
     def charger_images(df):
         X, y = [], []
         ok, manquants = 0, 0
-
         for _, row in df.iterrows():
-            csv_path = str(row[col_img]).strip()
-
-            # Méthode 1 : mapping via dicom_info.csv (patient folder → chemin JPEG)
-            path = os.path.join(img_dir, csv_path)
-            if not os.path.exists(path) and jpeg_map:
-                patient_folder = csv_path.split('/')[0]
-                path = jpeg_map.get(patient_folder, path)
-
-            # Méthode 2 : fallback — extraction UID depuis le chemin DICOM
-            if not os.path.exists(path):
-                parts = csv_path.replace("\\", "/").split("/")
-                uid = parts[-2]
-                jpeg_dir = os.path.join(img_dir, uid)
-                if os.path.isdir(jpeg_dir):
-                    jpg_files = sorted(f for f in os.listdir(jpeg_dir) if f.lower().endswith(".jpg"))
-                    if jpg_files:
-                        path = os.path.join(jpeg_dir, jpg_files[0])
-
+            path = os.path.join(img_dir, str(row[col_img]).strip())
             if not os.path.exists(path):
                 manquants += 1
                 continue
-
             try:
                 arr = ouvrir_image(path, target_size)
                 X.append(arr)
                 y.append(row['label'])
                 ok += 1
-            except Exception as e:
-                print(f"  Erreur image : {path} ({e})")
+            except Exception:
                 manquants += 1
-
         print(f"  Images chargees : {ok}  (manquantes/erreurs : {manquants})")
-
         if ok == 0:
             return None, None
-
-        return (
-            np.array(X)[:, :, :, np.newaxis],
-            np.array(y, dtype=np.int64)
-        )
+        return np.array(X)[:, :, :, np.newaxis], np.array(y, dtype=np.int64)
 
     print("  Chargement images train...")
     X_train, y_train = charger_images(df_train)
@@ -231,49 +137,8 @@ def charger_cbis_ddsm(csv_train, csv_test='', img_dir='.', target_size=(128, 128
 
     ratio_poids = (y_train == 0).sum() / max((y_train == 1).sum(), 1)
     print(f"  Ratio benin/malin (pos_weight) : {ratio_poids:.2f}")
-    print(
-        f"Train : {(y_train == 0).sum()} benins / {(y_train == 1).sum()} malins"
-    )
-
-    print(
-        f"Test  : {(y_test == 0).sum()} benins / {(y_test == 1).sum()} malins"
-    )
 
     return X_train, y_train, X_test, y_test, ratio_poids
-
-class MammographyDataset(Dataset):
-
-    def __init__(self, X, y, transform=None):
-        self.X = X
-        self.y = y
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.X)
-
-    def __getitem__(self, idx):
-
-        image = self.X[idx]          # (128,128,1)
-        label = self.y[idx]
-
-        image = torch.tensor(
-            image.transpose(2, 0, 1),   # -> (1,128,128)
-            dtype=torch.float32
-        )
-
-        if self.transform:
-            image = self.transform(image)
-
-        return image, torch.tensor(label, dtype=torch.float32)
-
-    @staticmethod
-    def get_train_transform():
-        from torchvision import transforms
-        return transforms.Compose([
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomRotation(degrees=5),
-            transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),
-        ])
 
 
 def afficher_stats_dataset(csv_train, csv_test=''):
@@ -371,58 +236,15 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
     torch.manual_seed(42)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n  Device : {device}")
-    print("CUDA disponible :", torch.cuda.is_available())
 
-    if torch.cuda.is_available():
-        print("GPU :", torch.cuda.get_device_name(0))
-        print("CUDA version :", torch.version.cuda)
-    else:
-        print("Aucun GPU CUDA détecté")
+    # PyTorch attend (N, C, H, W) : on transpose depuis notre format (N, H, W, C)
+    x_tr = torch.tensor(X_train.transpose(0, 3, 1, 2), dtype=torch.float32)
+    x_te = torch.tensor(X_test.transpose(0, 3, 1, 2),  dtype=torch.float32)
+    y_tr = torch.tensor(y_train, dtype=torch.float32)
+    y_te = torch.tensor(y_test,  dtype=torch.float32)
 
-    # Dataset statistics
-    mean = X_train.mean()
-    std = X_train.std()
-
-    print(f"Dataset mean = {mean:.4f}")
-    print(f"Dataset std  = {std:.4f}")
-    print(f"Min value    = {X_train.min():.4f}")
-    print(f"Max value    = {X_train.max():.4f}")
-
-    from torchvision import transforms
-
-    train_transform = transforms.Compose([
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(5),
-        transforms.RandomAffine(
-            degrees=0,
-            translate=(0.05, 0.05)
-        )
-    ])
-
-    train_dataset = MammographyDataset(
-        X_train,
-        y_train,
-        transform=train_transform
-    )
-
-    test_dataset = MammographyDataset(
-        X_test,
-        y_test,
-        transform=None
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=32,
-        shuffle=True
-    )
-
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=64,
-        shuffle=False
-    )
-
+    train_loader = DataLoader(TensorDataset(x_tr, y_tr), batch_size=32, shuffle=True,  num_workers=0)
+    test_loader  = DataLoader(TensorDataset(x_te, y_te), batch_size=64, shuffle=False, num_workers=0)
 
     class CNN_Mammography(nn.Module):
         def __init__(self):
@@ -436,43 +258,27 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
             # Bloc 2 : 64x64 → 32x32
             self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
             self.bn3   = nn.BatchNorm2d(128)
-            self.conv4 = nn.Conv2d(128, 128, 3, padding=1)
-            self.bn4 = nn.BatchNorm2d(128)
             self.pool2 = nn.MaxPool2d(2, 2)
             # Bloc 3 : 32x32 → 16x16
-            self.conv5 = nn.Conv2d(128, 256, 3, padding=1)
-            self.bn5 = nn.BatchNorm2d(256)
-            self.conv6 = nn.Conv2d(256, 256, 3, padding=1)
-            self.bn6 = nn.BatchNorm2d(256)
+            self.conv4 = nn.Conv2d(128, 128, 3, padding=1)
+            self.bn4   = nn.BatchNorm2d(128)
             self.pool3 = nn.MaxPool2d(2, 2)
-            # Global Average Pooling
-            self.gap = nn.AdaptiveAvgPool2d(1)
-            # Classification
-            self.fc1 = nn.Linear(256, 512)
-            self.fc2 = nn.Linear(512, 1)
-
+            # Tete de classification binaire
+            self.fc1  = nn.Linear(128 * 16 * 16, 256)
+            self.fc2  = nn.Linear(256, 1)
             self.relu = nn.ReLU()
-            self.drop = nn.Dropout(0.4)
+            self.drop = nn.Dropout(0.5)
 
         def forward(self, x):
             x = self.relu(self.bn1(self.conv1(x)))
             x = self.relu(self.bn2(self.conv2(x)))
             x = self.pool1(x)
-
             x = self.relu(self.bn3(self.conv3(x)))
-            x = self.relu(self.bn4(self.conv4(x)))
             x = self.pool2(x)
-
-            x = self.relu(self.bn5(self.conv5(x)))
-            x = self.relu(self.bn6(self.conv6(x)))
+            x = self.relu(self.bn4(self.conv4(x)))
             x = self.pool3(x)
-
-            x = self.gap(x)
-
             x = torch.flatten(x, 1)
-
             x = self.drop(self.relu(self.fc1(x)))
-
             return self.fc2(x)
 
     model = CNN_Mammography().to(device)
@@ -603,7 +409,7 @@ def entrainer_cnn_mammo(X_train, y_train, X_test, y_test, ratio_poids,
 # 3. EVALUATION MEDICALE
 # ============================================================
 
-def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.30, silent=False):
+def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.5, silent=False):
     """
     Metriques medicales completes pour la detection de cancer.
 
@@ -618,15 +424,7 @@ def evaluer_medical(y_true, y_pred, y_probs=None, seuil=0.30, silent=False):
     En pratique clinique, on accepte une sensibilite >= 90% meme si la specificite baisse.
     Le seuil optimal est determine via la courbe ROC (critere de Youden).
     """
-    if y_probs is not None:
-        y_pred_bin = (np.asarray(y_probs) >= seuil).astype(int)
-    else:
-        y_pred_bin = np.asarray(y_pred).astype(int)
-        print("y_pred min/max :", np.min(y_pred), np.max(y_pred))
-
-        if y_probs is not None:
-            print("y_probs min/max :", np.min(y_probs), np.max(y_probs))
-
+    y_pred_bin = (np.asarray(y_pred) >= seuil).astype(int)
     y_true_arr = np.asarray(y_true).astype(int)
 
     TP = int(((y_pred_bin == 1) & (y_true_arr == 1)).sum())
@@ -726,65 +524,16 @@ def menu_partie3():
     print("  Prerequis : CSV CBIS-DDSM + images correspondantes")
     print("  Sans donnees : pipeline de demonstration synthetique\n")
 
-    try:
-        dataset_root = telecharger_cbis_ddsm()
-    except Exception as e:
-        print(f"\n  Impossible de récupérer le dataset : {e}")
-        dataset_root = None
-
-    csv_train = os.path.join(
-        dataset_root,
-        "csv",
-        "mass_case_description_train_set.csv"
-    )
-
-    csv_test = os.path.join(
-        dataset_root,
-        "csv",
-        "mass_case_description_test_set.csv"
-    )
-
-    img_dir = os.path.join(dataset_root, "jpeg")
-
-    if dataset_root is not None:
-
-        for root, dirs, files in os.walk(dataset_root):
-            for f in files:
-                if f == "mass_case_description_train_set.csv":
-                    csv_train = os.path.join(root, f)
-
-                elif f == "mass_case_description_test_set.csv":
-                    csv_test = os.path.join(root, f)
-
-    csv_train = os.path.join(
-        dataset_root,
-        "csv",
-        "mass_case_description_train_set.csv"
-    )
-
-    csv_test = os.path.join(
-        dataset_root,
-        "csv",
-        "mass_case_description_test_set.csv"
-    )
-
-    img_dir = os.path.join(dataset_root, "jpeg")
-    img_dir = os.path.join(dataset_root, "jpeg")
-
-    uid_test = "342386194811267636608694132590482924515"
-
-    print(
-        os.path.exists(
-            os.path.join(img_dir, uid_test)
-        )
-    )
+    csv_train = input("  CSV train [mass_case_description_train_set.csv] : ").strip()
+    if not csv_train:
+        csv_train = 'mass_case_description_train_set.csv'
+    csv_test = input("  CSV test  [mass_case_description_test_set.csv]  : ").strip()
+    if not csv_test:
+        csv_test = 'mass_case_description_test_set.csv'
+    img_dir = input("  Dossier images [.] : ").strip() or '.'
 
     mode = "synthetique"
-    if (
-            csv_train is not None
-            and csv_test is not None
-            and img_dir is not None
-    ):
+    if os.path.exists(csv_train):
         result = charger_cbis_ddsm(csv_train, csv_test, img_dir)
         if result[0] is not None:
             X_train, y_train, X_test, y_test, ratio = result
